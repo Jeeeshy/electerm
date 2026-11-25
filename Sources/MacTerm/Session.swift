@@ -1,8 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum Pane { case bookmarks, files, hidden }
-
 enum TerminalInput { case bytes(Data), paste(String) }
 
 @MainActor final class Session: ObservableObject, Identifiable {
@@ -12,7 +10,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
     private var passwordChannel: PasswordChannel?
     let endpoint: Endpoint?
     var title: String { bookmark?.name ?? (endpoint == nil ? "Local" : address) }
-    @Published var pane: Pane
+    private var filesVisible = false
     @Published private(set) var live = false
     @Published private(set) var follow = Preferences.shared.object(forKey: "defaultFollow") as? Bool ?? true
     @Published var wrap = Preferences.shared.object(forKey: "defaultWrap") as? Bool ?? true
@@ -52,7 +50,6 @@ enum TerminalInput { case bytes(Data), paste(String) }
         self.bookmark = bookmark
         self.number = number; self.address = address; self.endpoint = endpoint
         monitor = endpoint != nil && Preferences.shared.bool(forKey: "defaultMonitor")
-        pane = endpoint == nil ? .bookmarks : .files
         screen.view.session = self
         screen.directory = { [weak self] dir in
             guard let self, self.endpoint != nil else { return }
@@ -61,7 +58,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
             self.probePending = false; self.watchCommandOutput = false
             self.listing = UUID()
             self.pending?.cancel(); self.pending = nil
-            if changed && self.follow && self.active && self.pane == .files && (self.requestedDirectory ?? self.path) != dir {
+            if changed && self.follow && self.active && self.filesVisible && (self.requestedDirectory ?? self.path) != dir {
                 self.refresh(dir, following: true)
             }
         }
@@ -103,7 +100,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
                                           output: { [weak self] data in
                 guard let self, self.generation == token else { return }
                 self.screen.receive(data)
-                if self.watchCommandOutput && self.active && self.follow && self.pane == .files {
+                if self.watchCommandOutput && self.active && self.follow && self.filesVisible {
                     self.lastOutput = ProcessInfo.processInfo.systemUptime
                     self.probePending = true
                 }
@@ -159,7 +156,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
         guard live else { return }
         terminal?.write(data)
         if enabled { broadcast?(.bytes(data)) }
-        if shellPID != nil && follow && pane == .files && (data.contains(13) || data.contains(10)) {
+        if shellPID != nil && follow && filesVisible && (data.contains(13) || data.contains(10)) {
             watchCommandOutput = true; probePending = true; scheduleProbe()
         }
     }
@@ -178,7 +175,6 @@ enum TerminalInput { case bytes(Data), paste(String) }
         guard endpoint != nil else { return }
         follow = enabled
         if enabled {
-            pane = .files
             resumePane()
         } else {
             pending?.cancel(); pending = nil; probePending = false; watchCommandOutput = false
@@ -186,29 +182,30 @@ enum TerminalInput { case bytes(Data), paste(String) }
             if followingRequest && requestedDirectory != nil { requestedDirectory = nil }
         }
     }
-    func toggle(_ choice: Pane) {
-        guard choice != .files || endpoint != nil else { return }
-        pane = pane == choice ? .hidden : choice
-        if pane == .files { resumePane() }
+    func setFilesVisible(_ visible: Bool) {
+        let visible = visible && endpoint != nil
+        guard filesVisible != visible else { return }
+        filesVisible = visible
+        if filesVisible { resumePane() }
         else {
             // Stop tracking the shell; allow the one outstanding listing to fill the cache.
             pending?.cancel(); pending = nil; probePending = false; watchCommandOutput = false; listing = UUID()
         }
     }
     func resumePane() {
-        guard authenticated, active, pane == .files else { return }
+        guard authenticated, active, filesVisible else { return }
         if follow, let cwd, cwd != path { refresh(cwd, following: true) }
         else if !hasListing && requestedDirectory == nil { refresh(path) }
         if follow { probePending = true; scheduleProbe(immediate: true) }
     }
     private func scheduleProbe(immediate: Bool = false) {
-        guard active, follow, authenticated, pane == .files, let pid = shellPID,
+        guard active, follow, authenticated, filesVisible, let pid = shellPID,
               let browser, !probing, pending == nil else { return }
         let token = generation, previousList = listing
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.generation == token else { return }
             self.pending = nil
-            guard self.active, self.follow, self.pane == .files else { return }
+            guard self.active, self.follow, self.filesVisible else { return }
             if !immediate, self.watchCommandOutput, ProcessInfo.processInfo.systemUptime - self.lastOutput < 0.15 {
                 self.scheduleProbe()
                 return
@@ -223,7 +220,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
                         let changed = next != self.cwd
                         if changed { self.watchCommandOutput = false }
                         self.cwd = next
-                        if (immediate || changed) && self.active && self.follow && self.pane == .files && self.path != next { self.refresh(next, following: true) }
+                        if (immediate || changed) && self.active && self.follow && self.filesVisible && self.path != next { self.refresh(next, following: true) }
                     }
                     if self.probePending { self.scheduleProbe() }
                 }
@@ -318,7 +315,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
     private func changedDirectory(_ parent: String) {
         guard parent == path, requestedDirectory == nil || requestedDirectory == parent else { return }
         hasListing = false
-        if active && pane == .files { refresh(parent) }
+        if active && filesVisible { refresh(parent) }
     }
     func cancelTransfer() { transferControl?.cancel() }
     func transfer(_ name: String, _ local: URL, upload: Bool, parent: String, connection: UUID, directory: Bool = false,

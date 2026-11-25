@@ -1,6 +1,8 @@
 import SwiftUI
 import TerminalPTY
 
+enum Pane { case bookmarks, files, hidden }
+
 @MainActor final class Workspace: ObservableObject {
     @Published var sessions: [Session] = []
     @Published var selected: UUID?
@@ -12,6 +14,11 @@ import TerminalPTY
     }
     var visibleSessions: [Session] {
         splitIDs.isEmpty ? [current].compactMap { $0 } : splitIDs.compactMap { id in sessions.first { $0.id == id } }
+    }
+    @Published private(set) var sidebar: Pane = .bookmarks
+    func toggleSidebar(_ choice: Pane) {
+        sidebar = sidebar == choice ? .hidden : choice
+        current?.setFilesVisible(sidebar == .files)
     }
     @Published var sendToAll = false
     @Published var bookmarks: [Bookmark] {
@@ -48,6 +55,7 @@ import TerminalPTY
             splitIDs[index] = s.id
         }
         current?.select(false)
+        s.setFilesVisible(sidebar == .files)
         selected = s.id; s.select(true)
         let view = s.screen.view
         view.window?.makeFirstResponder(view)

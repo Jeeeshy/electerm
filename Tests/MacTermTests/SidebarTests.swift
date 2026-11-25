@@ -27,6 +27,7 @@ import Testing
         work.sessions.append(ssh); work.choose(ssh)
         try await Task.sleep(for: .milliseconds(100))
         host.layoutSubtreeIfNeeded()
+        work.toggleSidebar(.files)
         ssh.setFollow(true)
         ssh.screen.receive(Data("\u{1b}]7;file://localhost\(dir.path)\u{7}".utf8))
         let gate = DispatchSemaphore(value: 0)
@@ -73,33 +74,47 @@ import Testing
         let savedWidth = prefs.double(forKey: "sidebarWidth")
         #expect(abs(savedWidth - Double(expectedWidth)) < 0.01)
         #expect(host.hitTest(NSPoint(x: expectedWidth + 4, y: 220)) is SidebarGrip.Grip)
-        let checked = try pixels(148, 9, 16, 18)
+        let checked = try pixels(180, 8, 48, 20)
+        let quickHeader = try pixels(2, 39, 138, 23)
         let files = try pixels(30, 66, 140, 25)
         let start = ContinuousClock.now
-        try await click(185, 18) // Toolbar checkbox
+        try await click(185, 18) // Follow toggle
         #expect(!ssh.follow && !ssh.loadingDirectory)
-        #expect(try pixels(148, 9, 16, 18) != checked)
+        #expect(try pixels(180, 8, 48, 20) != checked)
         try await click(14, 79) // Bookmarks rail
-        #expect(ssh.pane == .bookmarks && !ssh.loadingDirectory)
+        #expect(work.sidebar == .bookmarks && !ssh.loadingDirectory)
         #expect(try pixels(30, 66, 140, 25) != files)
+        #expect(try pixels(2, 39, 138, 23) == quickHeader)
         #expect(start.duration(to: .now) < .seconds(2))
         ssh.screen.receive(Data("\u{1b}]7;file://host/somewhere\u{7}".utf8))
         gate.signal()
         try await Task.sleep(for: .milliseconds(150))
-        #expect(ssh.pane == .bookmarks && ssh.path == "." && !ssh.loadingDirectory)
+        #expect(work.sidebar == .bookmarks && ssh.path == "." && !ssh.loadingDirectory)
         try await click(14, 107)
         for _ in 0..<150 where ssh.loadingDirectory { try await Task.sleep(for: .milliseconds(20)) }
         #expect(ssh.entries.includingHidden(true).count == fileCount)
         let listing = ssh.entries.id
         let populated = try pixels(30, 66, 140, 25)
         try await click(14, 79)
-        #expect(ssh.pane == .bookmarks)
+        #expect(work.sidebar == .bookmarks)
         #expect(try pixels(30, 66, 140, 25) != populated)
         let reopen = ContinuousClock.now
         try await click(14, 107)
-        #expect(ssh.pane == .files && !ssh.loadingDirectory && ssh.entries.id == listing)
+        #expect(work.sidebar == .files && !ssh.loadingDirectory && ssh.entries.id == listing)
         #expect(try pixels(30, 66, 140, 25) == populated)
         print("SFTP: re-open and capture, including a 50 ms UI settle: " + String(describing: reopen.duration(to: .now)))
+        try await click(14, 107) // Collapse; rail buttons keep their original rows.
+        #expect(work.sidebar == .hidden)
+        try await click(14, 51) // Compact quick connect opens without expanding the sidebar.
+        func quickEntryHasFocus() -> Bool {
+            NSApp.windows.filter(\.isVisible).contains { window in
+                let editor = window.firstResponder as? NSTextView
+                return (editor?.delegate as? NSTextField)?.placeholderString == "快速连接"
+            }
+        }
+        for _ in 0..<25 where !quickEntryHasFocus() { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(quickEntryHasFocus())
+        #expect(work.sidebar == .hidden)
     }
 
     @Test @MainActor func preferencesReachMountedAndBackgroundSessions() async throws {

@@ -43,25 +43,26 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
-    @Test @MainActor func testSidebarAndFollowSwitchWithoutWaitingForSSH() throws {
-        let ssh = Session(1, "example", endpoint: Endpoint("example"))
-        let local = Session(2)
-        defer { ssh.close(); local.close() }
-        #expect(ssh.pane == .files)
-        ssh.toggle(.bookmarks)
-        #expect(ssh.pane == .bookmarks)
+    @Test @MainActor func sidebarChoiceSurvivesTabChanges() throws {
+        let work = Workspace(), local = try #require(work.current)
+        let ssh = Session(2, "fixture", endpoint: Endpoint("fixture"))
+        work.sessions.append(ssh)
+        defer { work.sessions.forEach { $0.close() } }
+        work.toggleSidebar(.bookmarks) // Collapse before selecting SSH.
+        work.choose(ssh)
         ssh.setFollow(true)
-        #expect(ssh.pane == .files)
+        #expect(work.sidebar == .hidden && ssh.follow)
+        work.toggleSidebar(.files)
+        work.choose(local)
+        #expect(work.sidebar == .files)
+        work.choose(ssh)
         ssh.setFollow(false)
-        #expect(!ssh.follow)
-        #expect(ssh.pane == .files)
-        ssh.toggle(.files)
-        #expect(ssh.pane == .hidden)
-        ssh.toggle(.files)
-        #expect(ssh.pane == .files)
-        local.toggle(.files)
-        local.setFollow(true)
-        #expect(local.pane == .bookmarks)
+        #expect(work.sidebar == .files && !ssh.follow)
+        work.toggleSidebar(.files)
+        work.close(ssh)
+        #expect(work.current === local && work.sidebar == .hidden)
+        work.add()
+        #expect(work.sidebar == .hidden)
     }
 
     @Test @MainActor func hiddenPaneKeepsInFlightListing() async throws {
@@ -70,18 +71,19 @@ import Testing
         let gate = DispatchSemaphore(value: 0)
         let session = Session(1, "fixture", endpoint: Endpoint("fixture"))
         defer { gate.signal(); session.close(); try? FileManager.default.removeItem(at: dir) }
+        session.setFilesVisible(true)
         session.setFollow(false)
         session.connected(using: DirectoryChannel { _ in
             _ = gate.wait(timeout: .now() + 5)
             return try SFTP(executable: "/usr/libexec/sftp-server", arguments: ["-d", dir.path])
         })
-        session.toggle(.bookmarks)
-        #expect(session.pane == .bookmarks && session.loadingDirectory)
+        session.setFilesVisible(false)
+        #expect(session.loadingDirectory)
         gate.signal()
         for _ in 0..<100 where session.loadingDirectory { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(session.pane == .bookmarks && session.path.hasSuffix(dir.lastPathComponent))
+        #expect(session.path.hasSuffix(dir.lastPathComponent))
         let cached = session.entries.id
-        session.toggle(.files)
+        session.setFilesVisible(true)
         #expect(!session.loadingDirectory && session.entries.id == cached)
     }
 
@@ -289,6 +291,7 @@ import Testing
         let src = root.appendingPathComponent("source")
         let data = Data(repeating: 42, count: 96_001)
         try data.write(to: src)
+        s.setFilesVisible(true)
         s.connected(using: DirectoryChannel { control in
             try SFTP(executable: "/usr/libexec/sftp-server", arguments: ["-d", root.path], control: control)
         })

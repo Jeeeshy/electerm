@@ -51,6 +51,8 @@ private struct SessionPage: View {
     @AppSetting("monitorCPU") private var monitorCPU = true
     @AppSetting("monitorMemory") private var monitorMemory = true
     @ViewState private var quick = ""
+    @ViewState private var quickPopover = false
+    @FocusState private var quickFocused: Bool
     @ViewState private var editing: Bookmark?
     @ViewState private var panel: Panel?
     @ViewState private var search = false
@@ -135,71 +137,73 @@ private struct SessionPage: View {
         for tab in work.sessions where tab.screen.view.font != font { tab.screen.view.font = font }
     }
     private func page(_ s: Session) -> some View {
-        let width = s.pane == .hidden ? 28.0 : max(150, min(dragWidth ?? sidebarWidth, windowWidth - 250))
+        let width = work.sidebar == .hidden ? 28.0 : max(150, min(dragWidth ?? sidebarWidth, windowWidth - 250))
         let follow = s.follow
         return VStack(spacing: 0) {
             ScrollView(.horizontal) {
-                HStack(spacing: 15) {
-                    tool("doc.badge.plus", "新建书签", .cyan) {
-                        editing = nil; panel = .bookmark
-                    }
-                    tool("terminal.fill", "本地", .green) { work.add() }
+                HStack(spacing: 5) {
+                    tool("bookmark", "新建书签") { editing = nil; panel = .bookmark }
+                    tool("terminal", "本地") { work.add() }
                     if s.endpoint != nil {
-                        Toggle("SFTP 跟随终端目录", isOn: Binding(get: { follow }, set: s.setFollow))
-                            .toggleStyle(.checkbox)
-                        tool("heart", "保活", keepalive ? .cyan : .primary) {
+                        tool("link", "SFTP 跟随终端目录", active: follow) { s.setFollow(!follow) }
+                        tool("waveform.path.ecg", "保活", active: keepalive) {
                             keepalive.toggle()
                             s.message = keepalive ? "SSH 保活将在下次连接时开启" : "SSH 保活将在下次连接时关闭"
                         }
                     }
-                    tool("point.3.connected.trianglepath.dotted", "广播输入", work.sendToAll ? .cyan : .primary) {
+                    tool("antenna.radiowaves.left.and.right", "广播输入", active: work.sendToAll) {
                         work.sendToAll.toggle()
                     }
-                    tool("arrow.left.and.right", s.wrap ? "禁用换行" : "启用换行", .primary) {
+                    tool("return", "换行", active: s.wrap) {
                         s.wrap.toggle(); s.screen.setWrap(s.wrap)
                     }
-                    tool("arrow.up.left.and.arrow.down.right", "全屏", .primary) { NSApp.keyWindow?.toggleFullScreen(nil) }
-                    tool("magnifyingglass", "搜索", .primary) { search.toggle() }
-                    Spacer(minLength: 14)
-                    tool("rectangle.split.2x1", "分屏", .primary) { choosingPanes = true }
+                    tool("arrow.up.left.and.arrow.down.right", "全屏") { NSApp.keyWindow?.toggleFullScreen(nil) }
+                    tool("magnifyingglass", "搜索", active: search) { search.toggle() }
+                    Spacer(minLength: 10)
+                    tool("square.split.2x1", "分屏", active: !work.splitIDs.isEmpty) { choosingPanes = true }
                         .popover(isPresented: $choosingPanes) {
                             SplitChooser(work: work) { choosingPanes = false }
                         }
                     if !work.splitIDs.isEmpty {
-                        tool("rectangle", "取消分屏", .primary) { work.cancelSplit() }
+                        tool("rectangle", "取消分屏") { work.cancelSplit() }
                     }
-                    tool("gearshape.fill", "设置", .primary) { panel = .settings }
+                    tool("slider.horizontal.3", "设置") { panel = .settings }
                     Menu { themePicker.pickerStyle(.inline).labelsHidden() } label: {
-                        Label("界面主题", systemImage: "circle.lefthalf.filled").labelStyle(.titleAndIcon)
+                        toolLabel("circle.lefthalf.filled", "界面主题")
                     }.menuStyle(.borderlessButton).fixedSize().help("界面主题：" + theme.title)
                 }.padding(.horizontal, 10).frame(minWidth: windowWidth, alignment: .leading).frame(height: 36)
             }.scrollIndicators(.hidden).frame(height: 36).background(chrome)
             edge.frame(height: 1)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if s.pane != .hidden {
-                        HStack(spacing: 4) {
-                            TextField("快速连接", text: $quick).onSubmit { connect(s) }.textFieldStyle(.plain)
-                            icon("arrow.right", "SSH 连接") { connect(s) }.disabled(quick.isEmpty)
-                        }.padding(.horizontal, 7).frame(height: 28).background(chrome)
-                    }
+                    Group {
+                        if work.sidebar == .hidden {
+                            Button { quickPopover.toggle() } label: {
+                                Image(systemName: "bolt.horizontal.circle")
+                                    .frame(width: 28, height: 28).contentShape(Rectangle())
+                            }.help("快速连接").accessibilityLabel("快速连接")
+                                .popover(isPresented: $quickPopover, arrowEdge: .trailing) {
+                                    quickEntry(s).padding(8).frame(width: 240)
+                                        .onAppear { quickFocused = true }
+                                }
+                        } else { quickEntry(s) }
+                    }.frame(height: 28).background(chrome)
                     HStack(alignment: .top, spacing: 0) {
                         VStack(spacing: 0) {
-                            railButton("bookmark", "书签夹", selected: s.pane == .bookmarks) { s.toggle(.bookmarks) }
-                            if s.endpoint != nil {
-                                railButton("folder", "远程文件", selected: s.pane == .files) { s.toggle(.files) }
-                            }
+                            railButton("bookmark", "书签夹", selected: work.sidebar == .bookmarks) { work.toggleSidebar(.bookmarks) }
+                            railButton("folder", "远程文件", selected: work.sidebar == .files) { work.toggleSidebar(.files) }
                             Spacer()
                         }.frame(width: 28).background(chrome).zIndex(1)
-                        if s.pane != .hidden {
+                        if work.sidebar != .hidden {
                             Group {
-                                if s.pane == .bookmarks { BookmarkList(work: work) { editing = $0; panel = .bookmark } }
-                                else { FilePane(session: s).id(s.id) }
-                            }.frame(minWidth: 0, maxWidth: .infinity).clipped().contentShape(Rectangle())
+                                if work.sidebar == .bookmarks { BookmarkList(work: work) { editing = $0; panel = .bookmark } }
+                                else if s.endpoint != nil { FilePane(session: s).id(s.id) }
+                                else { Text("本地终端没有 SFTP").foregroundStyle(.secondary).padding(8) }
+                            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).clipped().contentShape(Rectangle())
                         }
-                    }
-                }.frame(width: width).background(bodyColor)
-                if s.pane != .hidden {
+                    }.frame(maxHeight: .infinity, alignment: .top)
+                }.frame(width: width).frame(maxHeight: .infinity, alignment: .top).background(bodyColor)
+                if work.sidebar != .hidden {
                     SidebarGrip(width: width, limit: windowWidth - 250) { value, finished in
                         if finished { sidebarWidth = value; dragWidth = nil } else { dragWidth = value }
                     }
@@ -221,9 +225,16 @@ private struct SessionPage: View {
             StatusLine(session: s).id(s.id).frame(height: 24).background(bodyColor)
         }
     }
+    private func quickEntry(_ s: Session) -> some View {
+        HStack(spacing: 4) {
+            TextField("快速连接", text: $quick).focused($quickFocused).onSubmit { connect(s) }.textFieldStyle(.plain)
+            icon("arrow.right", "SSH 连接") { connect(s) }.disabled(quick.isEmpty)
+        }.padding(.horizontal, 7)
+    }
     private func connect(_ s: Session) {
         guard !quick.isEmpty else { return }
-        if work.add(quick) == nil { s.message = "无效的 SSH 地址，请使用 user@host:port" }
+        if work.add(quick) != nil { quickPopover = false }
+        else { s.message = "无效的 SSH 地址，请使用 user@host:port" }
     }
 }
 
@@ -251,9 +262,9 @@ private struct WindowTitleTint: NSViewRepresentable {
 private func railButton(_ image: String, _ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Image(systemName: selected ? image + ".fill" : image)
-            .foregroundStyle(selected ? Color.accentColor : Color.primary)
+            .symbolRenderingMode(.monochrome).foregroundStyle(.primary)
             .frame(width: 28, height: 28)
-            .background(selected ? Color.accentColor.opacity(0.16) : .clear)
+            .background(selected ? Color.primary.opacity(0.12) : .clear)
             .contentShape(Rectangle())
     }.buttonStyle(.plain).accessibilityLabel(title).help(title)
 }
@@ -263,10 +274,20 @@ func icon(_ image: String, _ title: String, _ action: @escaping () -> Void) -> s
         .accessibilityLabel(title).help(title)
 }
 
-private func tool(_ image: String, _ title: String, _ tint: Color, _ action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-        HStack(spacing: 4) { Image(systemName: image).foregroundStyle(tint); Text(title) }
-    }.help(title)
+private func toolLabel(_ image: String, _ title: String, selected: Bool = false) -> some View {
+    HStack(spacing: 5) {
+        Image(systemName: image).symbolRenderingMode(.monochrome)
+            .font(.system(size: 13, weight: .medium)).frame(width: 16)
+        Text(title).lineLimit(1)
+    }.foregroundStyle(.primary).fixedSize().padding(.horizontal, 6).frame(height: 26)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(selected ? 0.12 : 0)))
+        .contentShape(Rectangle())
+}
+
+private func tool(_ image: String, _ title: String, active: Bool? = nil, _ action: @escaping () -> Void) -> some View {
+    Button(action: action) { toolLabel(image, title, selected: active == true) }
+        .help(title).accessibilityLabel(title)
+        .accessibilityValue(active.map { $0 ? "已开启" : "已关闭" } ?? "")
 }
 
 private struct BookmarkList: View {
