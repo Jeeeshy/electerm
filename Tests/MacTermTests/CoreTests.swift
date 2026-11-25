@@ -3,6 +3,38 @@ import Testing
 @testable import MacTerm
 
 @Suite(.serialized) struct CoreTests {
+    @Test func readOnlyInstallCanUseExistingPortableData() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let install = root.appendingPathComponent("install")
+        try fm.createDirectory(at: install, withIntermediateDirectories: true)
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: install.path)
+            try? fm.removeItem(at: root)
+        }
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: install.path)
+        let blocked = install.appendingPathComponent(PortableData.name, isDirectory: true)
+        let existing = root.appendingPathComponent(PortableData.name, isDirectory: true)
+        try PortableData.directory(existing)
+        let settings = existing.appendingPathComponent("settings.plist")
+        try Data("existing settings".utf8).write(to: settings)
+        #expect(try PortableData.writableFolder(startingAt: blocked) { _ in nil } == nil)
+        for choice in [root, existing] {
+            let selected = try PortableData.writableFolder(startingAt: blocked) { failed in
+                #expect(failed == blocked)
+                return choice
+            }
+            #expect(selected?.path == existing.path)
+        }
+        #expect(try Data(contentsOf: settings) == Data("existing settings".utf8))
+        #expect(fm.fileExists(atPath: existing.appendingPathComponent("Temp").path))
+        #expect(!fm.fileExists(atPath: blocked.path))
+        _ = try PortableData.writableFolder(startingAt: existing) { _ in Issue.record("可写目录不应弹窗"); return nil }
+        #expect(throws: TerminalError.self) {
+            try PortableData.writableFolder(startingAt: settings) { _ in Issue.record("无效的数据目录不应被忽略"); return nil }
+        }
+    }
+
     @Test @MainActor func portableDataRoundTrip() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try PortableData.directory(root)

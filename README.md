@@ -8,9 +8,11 @@
 
 1. 登录 GitHub，打开 [master 分支的 macOS 构建](https://github.com/Jeeeshy/electerm/actions/workflows/native-mac.yml?query=branch%3Amaster)，选择一次成功的运行。在 **Artifacts** 下下载 `Electerm-Terminal-mac-arm64`。
 2. 解压下载的文件。如果里面还有 `Electerm-Terminal-mac-arm64.zip`，再解压一次，即可看到 **Electerm Terminal** 文件夹。
-3. 把**整个文件夹**移到个人应用程序目录 `~/Applications/`，或保留在其他自己可写的位置。双击其中的 `Electerm Terminal.app` 即可启动。
+3. 用 Finder 在个人应用程序目录下新建 `~/Applications/Electerm Terminal/`（也可选其他自己可写的位置）。把解压出来的 **`Electerm Terminal.app` 本身**拖进这个新文件夹，再双击打开。如果已有 `Electerm Data/`，先退出程序，把它也移到新版应用旁边。
 
 直接双击与放进「应用程序」运行的是同一个程序。此版本使用本地 ad-hoc 签名，未经 Apple 公证。如果 macOS 阻止首次打开，请先核对下载来源；确认后可在「系统设置 → 隐私与安全性」中允许这一次打开。
+
+**提示目录只读？** macOS 有时会从隔离的只读位置启动下载的应用；磁盘映像和其他用户的目录也可能不可写。旧版请按第 3 步移动应用本身。Build 10 起，如果应用旁边不能写入，可以在启动面板里选择原有的 `Electerm Data/` 继续使用书签和密码库，或选择一个可写文件夹创建新的 `Electerm Data/`。取消会退出。选择仅对本次启动有效；想以后直接打开，就把应用移到所选数据目录旁。不需要更改系统权限。
 
 ### 更新、迁移与备份
 
@@ -31,7 +33,7 @@ Electerm Terminal/
 
 ### 卸载与清理
 
-- **卸载程序和数据：**退出应用，删除整个 `Electerm Terminal/` 文件夹。只删除 `.app` 会保留书签和密码库。无需卸载服务。
+- **卸载程序和数据：**退出应用，删除整个 `Electerm Terminal/` 文件夹。只删除 `.app` 会保留书签和密码库。如果启动时另选过数据位置，对应的 `Electerm Data/` 也需单独删除；请先备份需要的书签和密码库。无需卸载服务。
 - **只清临时文件：**退出后清空 `Electerm Data/Temp/`。SFTP 下载会在所选目标旁暂存，取消或失败时清理；如果传输中退出或断电，只删除确认属于该次下载的隐藏项 `.electerm-<UUID>`。
 - **可选的 macOS 清理：**系统可能单独记住窗口或文件面板偏好。退出后可运行 `defaults delete local.electerm.terminal.portable`；提示域不存在即无须清理。如存在，还可移除 `~/Library/Caches/local.electerm.terminal.portable` 和 `~/Library/Saved Application State/local.electerm.terminal.portable.savedState`。
 - 下载的文件、自己的 SSH 配置、私钥和 shell 历史不会随卸载删除。不要为卸载本程序删除 `~/.ssh`。如果曾使用旧原生版，其偏好域 `local.electerm.terminal.native` 和钥匙串服务 `local.electerm.terminal.native.ssh` 独立于本版，仅在确认不再需要时自行清理。
