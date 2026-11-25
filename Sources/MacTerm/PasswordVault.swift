@@ -2,15 +2,15 @@ import AppKit
 import CryptoKit
 import CommonCrypto
 
-// The salt and authenticated ciphertext travel with the application; the master password does not.
+// The salt and authenticated ciphertext are stored in Application Support; the master password does not.
 @MainActor final class PasswordVault {
-    static let shared = PasswordVault(file: PortableData.folder.appendingPathComponent("passwords.v1"))
+    static let shared = PasswordVault(file: AppData.folder.appendingPathComponent("passwords.v1"))
     let file: URL
     private var cached: SymmetricKey?
     init(file: URL) { self.file = file }
     private func unlock(create: Bool, password: (Bool) throws -> String) throws -> (Data, SymmetricKey, [String: Data]) {
         let exists = FileManager.default.fileExists(atPath: file.path)
-        guard exists || create else { throw TerminalError("便携密码库不存在") }
+        guard exists || create else { throw TerminalError("密码库不存在") }
         let data = exists ? try Data(contentsOf: file) : Data()
         guard !exists || data.count >= 44 else { throw TerminalError("密码库文件不完整") }
         let salt = exists ? Data(data.prefix(16)) : SymmetricKey(size: .bits128).withUnsafeBytes { Data($0) }
@@ -54,7 +54,7 @@ import CommonCrypto
     }
     static func prompt(create: Bool) throws -> String {
         let alert = NSAlert()
-        alert.messageText = create ? "设置便携密码库主密码" : "解锁便携密码库"
+        alert.messageText = create ? "设置密码库主密码" : "解锁密码库"
         alert.informativeText = create ? "至少 8 个字符。忘记后无法找回已保存的 SSH 密码。" : "本次运行只需解锁一次。"
         let field = NSSecureTextField(frame: NSRect(x: 0, y: create ? 30 : 0, width: 280, height: 24))
         field.placeholderString = "主密码"

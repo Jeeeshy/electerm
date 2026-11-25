@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a notarized DMG to GitHub Releases (master only)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -11,19 +16,25 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 60
+    outputs:
+      artifact: ${{ steps.package.outputs.artifact }}
+      version: ${{ steps.package.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Test and package arm64 app
+      - name: Check release branch
+        if: inputs.publish && github.ref != 'refs/heads/master'
+        run: exit 1
+      - name: Test and build arm64 app
         run: |
           for developer in /Applications/Xcode_26*.app/Contents/Developer; do
             if [ -d "$developer" ]; then export DEVELOPER_DIR="$developer"; break; fi
           done
           swift --version
           set -o pipefail
-          sh build-mac.sh 2>&1 | tee "$RUNNER_TEMP/native-build.log"
+          sh build-mac.sh --stage-app "$RUNNER_TEMP/Electerm Terminal.app" 2>&1 | tee "$RUNNER_TEMP/native-build.log"
       - name: Annotate build or test failures
         if: failure()
         run: |
@@ -33,8 +44,47 @@ jobs:
               if (++count == 20) exit
             }' "$RUNNER_TEMP/native-build.log"
           fi
+      - name: Create installation disk image
+        id: package
+        env:
+          DEVELOPER_ID_P12: ${{ github.ref == 'refs/heads/master' && secrets.DEVELOPER_ID_P12 || '' }}
+          P12_PASSWORD: ${{ github.ref == 'refs/heads/master' && secrets.P12_PASSWORD || '' }}
+          APPLE_KEY_P8: ${{ github.ref == 'refs/heads/master' && secrets.APPLE_KEY_P8 || '' }}
+          APPLE_KEY_ID: ${{ github.ref == 'refs/heads/master' && secrets.APPLE_KEY_ID || '' }}
+          APPLE_ISSUER_ID: ${{ github.ref == 'refs/heads/master' && secrets.APPLE_ISSUER_ID || '' }}
+          REQUIRE_RELEASE: ${{ inputs.publish }}
+        run: |
+          name=Electerm-Terminal-mac-arm64
+          if [[ "$REQUIRE_RELEASE" == true || -n "${DEVELOPER_ID_P12}${P12_PASSWORD}${APPLE_KEY_P8}${APPLE_KEY_ID}${APPLE_ISSUER_ID}" ]]; then
+            sh package-mac.sh release "$RUNNER_TEMP/Electerm Terminal.app"
+          else
+            sh package-mac.sh test "$RUNNER_TEMP/Electerm Terminal.app"
+            name="$name-TEST"
+            echo 'Test DMG only: no Apple distribution credentials configured.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "artifact=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$(plutil -extract CFBundleVersion raw Info.plist)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: Electerm-Terminal-mac-arm64
-          path: dist/Electerm-Terminal-mac-arm64.zip
+          name: ${{ steps.package.outputs.artifact }}
+          path: dist/${{ steps.package.outputs.artifact }}.dmg
           if-no-files-found: error
+
+  publish:
+    if: inputs.publish && github.ref == 'refs/heads/master' && needs.build.outputs.artifact == 'Electerm-Terminal-mac-arm64'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Electerm-Terminal-mac-arm64
+      - name: Publish verified DMG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "mac-build-$BUILD" Electerm-Terminal-mac-arm64.dmg \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Electerm Terminal · Build $BUILD" \
+            --notes "Apple Silicon · macOS 14+ · Developer ID signed and notarized."

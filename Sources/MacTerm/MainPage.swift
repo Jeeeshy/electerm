@@ -23,7 +23,7 @@ private struct SessionPage: View {
     @ObservedObject var session: Session
     let windowWidth: CGFloat
     @ViewState private var choosingPanes = false
-    @PortableSetting("interfaceTheme") private var theme = InterfaceTheme.system
+    @AppSetting("interfaceTheme") private var theme = InterfaceTheme.system
     @StateObject private var system = SystemAppearance()
     private var scheme: ColorScheme { theme.scheme ?? (system.light ? .light : .dark) }
     private var light: Bool { scheme == .light }
@@ -32,24 +32,24 @@ private struct SessionPage: View {
             ForEach(InterfaceTheme.allCases, id: \.self) { Text($0.title).tag($0) }
         }
     }
-    @PortableSetting("sidebarWidth") private var sidebarWidth = 224.0
-    @PortableSetting("fontSize") private var fontSize = 13.0
-    @PortableSetting("keepalive") private var keepalive = true
-    @PortableSetting("shellTracking") private var shellTracking = true
-    @PortableSetting("scrollback") private var scrollback = 3000
-    @PortableSetting("defaultWrap") private var defaultWrap = true
-    @PortableSetting("defaultFollow") private var defaultFollow = true
-    @PortableSetting("showHiddenFiles") private var showHiddenFiles = false
-    @PortableSetting("defaultMonitor") private var defaultMonitor = false
-    @PortableSetting("monitorInterval") private var monitorInterval = 3
-    @PortableSetting("fontFamily") private var fontFamily = "自动"
-    @PortableSetting("cursorStyle") private var cursor = "blinkBlock"
-    @PortableSetting("keepaliveSeconds") private var keepaliveSeconds = 30
-    @PortableSetting("connectTimeout") private var connectTimeout = 0
-    @PortableSetting("fileSizeColumn") private var sizes = false
-    @PortableSetting("fileDateColumn") private var dates = false
-    @PortableSetting("monitorCPU") private var monitorCPU = true
-    @PortableSetting("monitorMemory") private var monitorMemory = true
+    @AppSetting("sidebarWidth") private var sidebarWidth = 224.0
+    @AppSetting("fontSize") private var fontSize = 13.0
+    @AppSetting("keepalive") private var keepalive = true
+    @AppSetting("shellTracking") private var shellTracking = true
+    @AppSetting("scrollback") private var scrollback = 3000
+    @AppSetting("defaultWrap") private var defaultWrap = true
+    @AppSetting("defaultFollow") private var defaultFollow = true
+    @AppSetting("showHiddenFiles") private var showHiddenFiles = false
+    @AppSetting("defaultMonitor") private var defaultMonitor = false
+    @AppSetting("monitorInterval") private var monitorInterval = 3
+    @AppSetting("fontFamily") private var fontFamily = "自动"
+    @AppSetting("cursorStyle") private var cursor = "blinkBlock"
+    @AppSetting("keepaliveSeconds") private var keepaliveSeconds = 30
+    @AppSetting("connectTimeout") private var connectTimeout = 0
+    @AppSetting("fileSizeColumn") private var sizes = false
+    @AppSetting("fileDateColumn") private var dates = false
+    @AppSetting("monitorCPU") private var monitorCPU = true
+    @AppSetting("monitorMemory") private var monitorMemory = true
     @ViewState private var quick = ""
     @ViewState private var editing: Bookmark?
     @ViewState private var panel: Panel?

@@ -124,21 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             engine.close()
             exit(ok ? EXIT_SUCCESS : EXIT_FAILURE)
         }
-        do {
-            let ready = try PortableData.prepare { unavailable in
-                let app = NSApplication.shared
-                app.setActivationPolicy(.regular); app.activate(ignoringOtherApps: true)
-                let panel = NSOpenPanel()
-                panel.title = "选择 Electerm 数据位置"
-                panel.message = "无法写入 \(unavailable.path)。请选择已有的 Electerm Data，或选择一个可写文件夹以在其中创建 Electerm Data。此选择仅用于本次启动。"
-                panel.prompt = "使用此位置"
-                panel.canChooseFiles = false; panel.canChooseDirectories = true
-                panel.canCreateDirectories = true
-                panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
-                return panel.runModal() == .OK ? panel.url : nil
-            }
-            if !ready { exit(EXIT_SUCCESS) }
-        }
+        do { try AppData.prepare() }
         catch {
             NSAlert(error: error).runModal(); exit(EXIT_FAILURE)
         }

@@ -1,42 +1,36 @@
 # Electerm Terminal
 
-面向 Apple Silicon Mac 的便携 SSH 终端。在同一个窗口中使用本地 shell、连接远程服务器、浏览 SFTP 文件和查看 Linux 主机状态。界面使用 SwiftUI 和 AppKit，终端使用 SwiftTerm，SSH 使用系统 OpenSSH；不依赖 Electron。
+面向 Apple Silicon Mac 的原生 SSH 终端。在同一个窗口中使用本地 shell、连接远程服务器、浏览 SFTP 文件和查看 Linux 主机状态。界面使用 SwiftUI 和 AppKit，终端使用 SwiftTerm，SSH 使用系统 OpenSSH；不依赖 Electron。
 
 **运行要求：**macOS 14 或更高版本，Apple Silicon（M 系列芯片）。使用成品无需安装 Xcode 或其他开发工具。
 
 ## 安装
 
-1. 登录 GitHub，打开 [master 分支的 macOS 构建](https://github.com/Jeeeshy/electerm/actions/workflows/native-mac.yml?query=branch%3Amaster)，选择一次成功的运行。在 **Artifacts** 下下载 `Electerm-Terminal-mac-arm64`。
-2. 解压下载的文件。如果里面还有 `Electerm-Terminal-mac-arm64.zip`，再解压一次，即可看到 **Electerm Terminal** 文件夹。
-3. 用 Finder 在个人应用程序目录下新建 `~/Applications/Electerm Terminal/`（也可选其他自己可写的位置）。把解压出来的 **`Electerm Terminal.app` 本身**拖进这个新文件夹，再双击打开。如果已有 `Electerm Data/`，先退出程序，把它也移到新版应用旁边。
+1. 在 [GitHub Releases](https://github.com/Jeeeshy/electerm/releases) 下载正式版 `Electerm-Terminal-mac-arm64.dmg`。只有通过 Developer ID 签名、Apple 公证和 Gatekeeper 检查的安装包才会由发布流程上传到这里。如果没有这个文件，说明还没有可供下载的正式 DMG。
+2. 打开 DMG，将 **Electerm Terminal** 拖到旁边的 **Applications（应用程序）**，然后推出磁盘映像。
+3. 从「应用程序」打开 Electerm Terminal。无需选择数据位置。macOS 可能会按惯例询问是否打开从互联网下载的应用。
 
-直接双击与放进「应用程序」运行的是同一个程序。此版本使用本地 ad-hoc 签名，未经 Apple 公证。如果 macOS 阻止首次打开，请先核对下载来源；确认后可在「系统设置 → 隐私与安全性」中允许这一次打开。
+GitHub Actions 中名称带 **`-TEST`** 的 DMG 仅供开发测试，未经过 Apple 公证，其他 Mac 可能阻止打开。请勿将它当作正式版分发。
 
-**提示目录只读？** macOS 有时会从隔离的只读位置启动下载的应用；磁盘映像和其他用户的目录也可能不可写。旧版请按第 3 步移动应用本身。Build 10 起，如果应用旁边不能写入，可以在启动面板里选择原有的 `Electerm Data/` 继续使用书签和密码库，或选择一个可写文件夹创建新的 `Electerm Data/`。取消会退出。选择仅对本次启动有效；想以后直接打开，就把应用移到所选数据目录旁。不需要更改系统权限。
+### 配置、更新与迁移
 
-### 更新、迁移与备份
+应用自动使用当前用户的 `~/Library/Application Support/Electerm Terminal/`。在 Finder 按 **⇧⌘G**，粘贴此路径即可打开。更新时只需退出并替换「应用程序」里的 `.app`，书签和设置不会跟着被替换。
 
-**更新时只替换应用，搬家时移动整个文件夹。** 先退出程序，再把新版 `Electerm Terminal.app` 放入原文件夹，保留旁边的 `Electerm Data/`。只移动 `.app` 会让程序在新位置查找数据，原书签不会自动跟过去。首次使用不会导入旧版 Electron 或旧原生版的数据。
+| 数据 | 内容 |
+| --- | --- |
+| `settings.plist` | 书签和应用设置 |
+| `known_hosts` | 接受过的 SSH 主机密钥 |
+| `passwords.v1` | 可选的加密密码库；主密码不落盘 |
+| `Temp/` | SSH 会话和 Finder 拖出暂存，退出后可清空 |
 
-```text
-Electerm Terminal/
-├── Electerm Terminal.app
-├── 使用与清理.md
-└── Electerm Data/           # 运行时创建，不随下载包分发
-    ├── settings.plist       # 书签与界面设置
-    ├── known_hosts          # 接受过的 SSH 主机密钥
-    ├── passwords.v1         # 选择保存密码时使用的加密库
-    └── Temp/                # SSH 套接字与 Finder 拖出暂存
-```
-
-备份前退出程序，复制 `Electerm Data/` 即可保留应用数据；`Temp/` 无须备份。自选 SSH 私钥仍在原路径，需要单独保管。密码库使用 PBKDF2-SHA256 和 AES-GCM，主密码不落盘，忘记后无法恢复。
+备份时退出应用，复制上述数据目录即可，`Temp/` 不必备份。**从 Build 10 便携版升级**：程序不会移动旧文件。若新版还没有自己的书签，退出新旧程序，将旧 `Electerm Data/` 里的 `settings.plist`、`known_hosts` 和 `passwords.v1`（如果存在）复制到新数据目录。若目标已有配置，请先备份；替换文件不会合并书签。自选私钥仍在原路径，需自行保管。
 
 ### 卸载与清理
 
-- **卸载程序和数据：**退出应用，删除整个 `Electerm Terminal/` 文件夹。只删除 `.app` 会保留书签和密码库。如果启动时另选过数据位置，对应的 `Electerm Data/` 也需单独删除；请先备份需要的书签和密码库。无需卸载服务。
-- **只清临时文件：**退出后清空 `Electerm Data/Temp/`。SFTP 下载会在所选目标旁暂存，取消或失败时清理；如果传输中退出或断电，只删除确认属于该次下载的隐藏项 `.electerm-<UUID>`。
-- **可选的 macOS 清理：**系统可能单独记住窗口或文件面板偏好。退出后可运行 `defaults delete local.electerm.terminal.portable`；提示域不存在即无须清理。如存在，还可移除 `~/Library/Caches/local.electerm.terminal.portable` 和 `~/Library/Saved Application State/local.electerm.terminal.portable.savedState`。
-- 下载的文件、自己的 SSH 配置、私钥和 shell 历史不会随卸载删除。不要为卸载本程序删除 `~/.ssh`。如果曾使用旧原生版，其偏好域 `local.electerm.terminal.native` 和钥匙串服务 `local.electerm.terminal.native.ssh` 独立于本版，仅在确认不再需要时自行清理。
+- **仅卸载程序：**退出并把「应用程序」里的 `Electerm Terminal.app` 移到废纸篓。保留数据目录，下次安装还能继续使用。
+- **同时删除数据：**确认不再需要书签和密码库后，在 Finder 删除 `~/Library/Application Support/Electerm Terminal/`。若曾用便携版，可另行删除自己保存的旧 `Electerm Data/`。DMG 也可删除。
+- **可选的系统记录：**macOS 可能保存窗口或文件面板偏好。退出后可运行 `defaults delete local.electerm.terminal.portable`；若域不存在则无需清理。如存在，也可删除 `~/Library/Caches/local.electerm.terminal.portable` 和 `~/Library/Saved Application State/local.electerm.terminal.portable.savedState`。
+- 用户下载的文件、SSH 私钥、`~/.ssh` 和 shell 历史不属于应用缓存。下载中断后若有残留，只删除确认属于该次下载的隐藏暂存项 `.electerm-<UUID>`。
 
 ## 功能
 
@@ -65,7 +59,20 @@ cd electerm
 sh build-mac.sh
 ```
 
-脚本校验 SwiftTerm 的固定提交并应用仓库内的补丁，运行测试，生成 ARM64 Release 应用，检查架构与签名，再从成品运行终端引擎自检。输出文件为 `dist/Electerm-Terminal-mac-arm64.zip`。本地调试可先执行 `sh prepare-swiftterm.sh`，再执行 `swift run`。项目内的依赖副本、模块缓存和编译中间产物集中在 `.build/`，构建结束后可删除。
+脚本校验 SwiftTerm 的固定提交，运行测试并检查 Release 应用的架构、签名和终端自检，输出本地测试用 `dist/Electerm-Terminal-mac-arm64-TEST.dmg`。本地调试可运行 `sh prepare-swiftterm.sh` 和 `swift run`。构建依赖及中间产物在项目的 `.build/`，构建结束后可删除。
+
+### 维护者：发布公证版
+
+参考 [Apple Developer ID](https://developer.apple.com/developer-id/) 准备 **Developer ID Application** 证书（需带私钥）以及有权使用公证服务的 App Store Connect 团队 API 密钥。在仓库 **Settings → Secrets and variables → Actions → Repository secrets** 配置以下机密，不要把证书、私钥或口令提交到 Git：
+
+| Secret | 值 |
+| --- | --- |
+| `DEVELOPER_ID_P12` | 导出的 Developer ID Application 证书和私钥（.p12 文件的 Base64） |
+| `P12_PASSWORD` | 导出 .p12 时设置的密码 |
+| `APPLE_KEY_P8` | 团队 API 私钥（.p8 文件的 Base64） |
+| `APPLE_KEY_ID`、`APPLE_ISSUER_ID` | 该密钥的 Key ID 和 Issuer ID，分别保存 |
+
+配置后在 **Actions → Native Mac (Apple Silicon) → Run workflow** 选择 `master`，勾选发布。流程使用临时钥匙串、加固运行时和安全时间戳，分别为应用及 DMG 公证、附上票据并检查 Gatekeeper；全部成功后才上传 DMG 到 Releases。没有凭据的普通推送只生成明确标记的测试包；请求正式发布时缺少凭据会直接失败。每个正式版本使用唯一的 `CFBundleVersion`。
 
 ## 许可证
 

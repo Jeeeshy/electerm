@@ -279,7 +279,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
                 guard let self, self.generation == connection, !self.working, self.authenticated else {
                     callback(nil, false, TerminalError("连接不可用或传输正在进行")); return
                 }
-                let dir = PortableData.temporary.appendingPathComponent("electerm-drag-" + UUID().uuidString)
+                let dir = AppData.temporary.appendingPathComponent("electerm-drag-" + UUID().uuidString)
                 do {
                     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false,
                                                            attributes: [.posixPermissions: 0o700])

@@ -1,8 +1,8 @@
 import SwiftUI
 
-enum PortableData {
-    static let name = "Electerm Data"
-    private(set) static var folder = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true)
+enum AppData {
+    static let folder: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Electerm Terminal", isDirectory: true)
     static func directory(_ url: URL) throws {
         let fm = FileManager.default
         if !fm.fileExists(atPath: url.path) {
@@ -18,43 +18,22 @@ enum PortableData {
         }
     }
     private(set) static var temporary = FileManager.default.temporaryDirectory
-    private static func locationDenied(_ error: NSError) -> Bool {
-        if error.domain == NSPOSIXErrorDomain { return [EROFS, EACCES, EPERM].contains(Int32(error.code)) }
-        if error.domain == NSCocoaErrorDomain,
-           [.fileWriteVolumeReadOnly, .fileWriteNoPermission, .fileReadNoPermission].contains(CocoaError.Code(rawValue: error.code)) { return true }
-        return (error.userInfo[NSUnderlyingErrorKey] as? NSError).map(locationDenied) ?? false
+    static func prepareFolders(at folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try directory(folder)
+        try directory(folder.appendingPathComponent("Temp", isDirectory: true))
     }
-    static func writableFolder(startingAt initial: URL, choose: (URL) -> URL?) throws -> URL? {
-        var candidate = initial
-        while true {
-            do {
-                for dir in [candidate, candidate.appendingPathComponent("Temp", isDirectory: true)] {
-                    try directory(dir)
-                    guard access(dir.path, W_OK | X_OK) == 0 else {
-                        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: [NSFilePathErrorKey: dir.path])
-                    }
-                }
-                return candidate
-            } catch {
-                guard locationDenied(error as NSError) else { throw error }
-                guard let selected = choose(candidate) else { return nil }
-                candidate = selected.lastPathComponent == name ? selected : selected.appendingPathComponent(name, isDirectory: true)
-            }
-        }
-    }
-    static func prepare(choose: (URL) -> URL?) throws -> Bool {
-        guard let folder = try writableFolder(startingAt: folder, choose: choose) else { return false }
+    static func prepare() throws {
+        try prepareFolders(at: folder)
         let lock = Darwin.open(folder.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         guard lock >= 0 else { throw POSIXError(.EACCES) }
-        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { close(lock); throw TerminalError("此便携目录已由另一实例使用") }
+        guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { close(lock); throw TerminalError("此应用数据目录已由另一实例使用") }
         // Keep the directory descriptor until process exit. No lock file survives a crash.
         do {
             try Preferences.shared.open(at: folder.appendingPathComponent("settings.plist"))
             guard FileManager.default.changeCurrentDirectoryPath(folder.path) else { throw TerminalError("无法进入数据目录：\(folder.path)") }
         } catch { close(lock); throw error }
-        self.folder = folder
         temporary = folder.appendingPathComponent("Temp", isDirectory: true)
-        return true
     }
 }
 
@@ -96,7 +75,7 @@ final class Preferences: ObservableObject {
     }
 }
 
-@propertyWrapper struct PortableSetting<Value>: DynamicProperty {
+@propertyWrapper struct AppSetting<Value>: DynamicProperty {
     private var store: Preferences { .shared }
     let key: String, fallback: Value
     let decode: (Any?) -> Value?, encode: (Value) -> Any

@@ -5,9 +5,9 @@ struct FilePane: View {
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject var session: Session
     @ViewState private var draft = ""
-    @PortableSetting("showHiddenFiles") private var hidden = false
-    @PortableSetting("fileSizeColumn") private var sizes = false
-    @PortableSetting("fileDateColumn") private var dates = false
+    @AppSetting("showHiddenFiles") private var hidden = false
+    @AppSetting("fileSizeColumn") private var sizes = false
+    @AppSetting("fileDateColumn") private var dates = false
     @ViewState private var prompt: FilePrompt?
     @ViewState private var input = ""
     @ViewState private var selection: RemoteFile?
@@ -183,9 +183,9 @@ private struct FileRows: View, Equatable {
 struct StatusLine: View {
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject var session: Session
-    @PortableSetting("monitorInterval") private var interval = 3
-    @PortableSetting("monitorCPU") private var showCPU = true
-    @PortableSetting("monitorMemory") private var showMemory = true
+    @AppSetting("monitorInterval") private var interval = 3
+    @AppSetting("monitorCPU") private var showCPU = true
+    @AppSetting("monitorMemory") private var showMemory = true
     @ViewState private var details = false
     private var needsCPU: Bool { showCPU || details }
     private var needsMemory: Bool { showMemory || details }

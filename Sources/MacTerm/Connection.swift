@@ -79,7 +79,7 @@ struct Remote {
     var socket: String { directory.appendingPathComponent("s").path }
     init(_ endpoint: Endpoint) throws {
         self.endpoint = endpoint
-        directory = PortableData.temporary.appendingPathComponent("et-" + UUID().uuidString)
+        directory = AppData.temporary.appendingPathComponent("et-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
     }

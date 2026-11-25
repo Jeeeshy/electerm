@@ -35,7 +35,7 @@ struct BookmarkEditor: View {
             Toggle("保存 SSH 登录密码", isOn: $remember)
             if remember {
                 SecureField("密码", text: $password, prompt: Text(original?.portablePassword == true ? "地址不变时，留空保留原密码" : "登录密码"))
-                Text("密码保存在便携加密库中；验证码请手动输入。").font(.caption).foregroundStyle(.secondary)
+                Text("密码保存在本地加密库中；验证码请手动输入。").font(.caption).foregroundStyle(.secondary)
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red) }
             HStack { Spacer(); Button("保存", action: save).keyboardShortcut(.defaultAction) }

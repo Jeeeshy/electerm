@@ -25,8 +25,7 @@ bin="$(spm build -c release --arch arm64 --show-bin-path)"
 mkdir -p dist
 stage="$(mktemp -d "$PWD/dist/.package-XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-portable="$stage/Electerm Terminal"
-app="$portable/Electerm Terminal.app"
+app="$stage/Electerm Terminal.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 install -m 755 "$bin/ElectermMac" "$app/Contents/MacOS/ElectermMac"
 strip -x "$app/Contents/MacOS/ElectermMac"
@@ -42,8 +41,12 @@ fi
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
 "$app/Contents/MacOS/ElectermMac" --verify-terminal
-awk '/^## 安装$/ { emit=1 } /^## 功能$/ { exit } emit' README.md > "$portable/使用与清理.md"
-test -s "$portable/使用与清理.md"
-ditto --norsrc --noextattr -c -k --keepParent "$portable" "$stage/Electerm-Terminal-mac-arm64.zip"
-mv -f "$stage/Electerm-Terminal-mac-arm64.zip" dist/
-echo "dist/Electerm-Terminal-mac-arm64.zip"
+if [ "$#" -eq 2 ] && [ "$1" = --stage-app ]; then
+  test ! -e "$2"
+  ditto "$app" "$2"
+elif [ "$#" -eq 0 ]; then
+  sh package-mac.sh test "$app"
+else
+  echo "Usage: sh build-mac.sh [--stage-app DESTINATION]" >&2
+  exit 2
+fi
