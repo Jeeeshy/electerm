@@ -50,6 +50,9 @@ private struct SessionPage: View {
     @AppSetting("fileDateColumn") private var dates = false
     @AppSetting("monitorCPU") private var monitorCPU = true
     @AppSetting("monitorMemory") private var monitorMemory = true
+    @AppSetting("monitorDisk") private var monitorDisk = false
+    @AppSetting("monitorUsers") private var monitorUsers = false
+    @AppSetting("monitorUptime") private var monitorUptime = false
     @ViewState private var quick = ""
     @ViewState private var quickPopover = false
     @FocusState private var quickFocused: Bool
@@ -81,14 +84,15 @@ private struct SessionPage: View {
         .sheet(item: $panel) { item in
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text(item == .bookmark ? (editing == nil ? "新建书签" : "编辑书签") : "设置").font(.headline)
+                    Text(item == .bookmark ? (editing == nil ? "连接 SSH" : "编辑书签") : "设置").font(.headline)
                     Spacer(); icon("xmark", "关闭") { panel = nil }.keyboardShortcut(.cancelAction)
                 }
                 if item == .bookmark {
-                    BookmarkEditor(original: editing) { saved in
+                    BookmarkEditor(original: editing) { saved, connect in
                         if let i = work.bookmarks.firstIndex(where: { $0.id == saved.id }) { work.bookmarks[i] = saved }
                         else { work.bookmarks.append(saved) }
                         panel = nil
+                        if connect { work.add(saved.address, bookmark: saved) }
                     }
                 } else {
                     Form {
@@ -122,7 +126,10 @@ private struct SessionPage: View {
                             Toggle("启用远程监控", isOn: $defaultMonitor)
                             Toggle("底栏 CPU 占用率", isOn: $monitorCPU)
                             Toggle("底栏内存", isOn: $monitorMemory)
-                            Picker("采样间隔", selection: $monitorInterval) {
+                            Toggle("底栏硬盘用量", isOn: $monitorDisk)
+                            Toggle("底栏登录用户", isOn: $monitorUsers)
+                            Toggle("底栏运行时间", isOn: $monitorUptime)
+                            Picker("CPU / 内存采样间隔", selection: $monitorInterval) {
                                 ForEach([2, 3, 5, 10], id: \.self) { Text("\($0) 秒").tag($0) }
                             }
                         }
@@ -142,8 +149,8 @@ private struct SessionPage: View {
         return VStack(spacing: 0) {
             ScrollView(.horizontal) {
                 HStack(spacing: 5) {
-                    tool("bookmark", "新建书签") { editing = nil; panel = .bookmark }
-                    tool("terminal", "本地") { work.add() }
+                    tool("network", "连接 SSH") { editing = nil; panel = .bookmark }
+                    tool("terminal", "新建本地") { work.add() }
                     if s.endpoint != nil {
                         tool("link", "SFTP 跟随终端目录", active: follow) { s.setFollow(!follow) }
                         tool("waveform.path.ecg", "保活", active: keepalive) {
@@ -243,7 +250,27 @@ private struct WindowTitleTint: NSViewRepresentable {
     let rgb: Int
     final class Anchor: NSView {
         var rgb: Int?
-        override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); applyTint() }
+        private var titleClicks: Any?
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if let titleClicks { NSEvent.removeMonitor(titleClicks); self.titleClicks = nil }
+            super.viewWillMove(toWindow: newWindow)
+        }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow(); applyTint()
+            guard let window else { return }
+            titleClicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
+                guard event.clickCount == 2, let window, event.window === window,
+                      !window.styleMask.contains(.fullScreen), window.attachedSheet == nil,
+                      event.locationInWindow.y >= window.contentLayoutRect.maxY else { return event }
+                let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+                for type in buttons {
+                    if let button = window.standardWindowButton(type),
+                       button.convert(button.bounds, to: nil).insetBy(dx: -2, dy: -2).contains(event.locationInWindow) { return event }
+                }
+                window.performZoom(nil)
+                return nil
+            }
+        }
         func applyTint() {
             guard let window, let rgb else { return }
             window.setFrameAutosaveName("")

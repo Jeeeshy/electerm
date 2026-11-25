@@ -78,3 +78,12 @@ int term_askpass(const char *path, const char *target_prompt, const char *prompt
     int ok = puts(buf) != EOF;
     memset_s(buf, sizeof(buf), 0, sizeof(buf)); return ok ? 0 : 1;
 }
+
+// The packaged SSH_ASKPASS only needs this C entry point, not AppKit or SwiftUI.
+#ifdef ELECTERM_ASKPASS_MAIN
+int main(int argc, char **argv) {
+    const char *path = getenv("ELECTERM_ASKPASS_SOCKET");
+    const char *prompt = getenv("ELECTERM_ASKPASS_PROMPT");
+    return (argc == 2 && path && prompt) ? term_askpass(path, prompt, argv[1]) : 1;
+}
+#endif

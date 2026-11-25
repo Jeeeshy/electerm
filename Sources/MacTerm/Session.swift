@@ -20,6 +20,10 @@ enum TerminalInput { case bytes(Data), paste(String) }
     @Published var working = false
     @Published var monitor = false { didSet { if monitor != oldValue { resetSample() } } }
     @Published var memory = "—"
+    var revealSFTP: (() -> Void)?
+    private var revealAfterLogin = false
+    private var loginStarted: TimeInterval?
+    private var masterWatch: DispatchSourceFileSystemObject?
     var activatePane: (() -> Void)?
     var broadcast: ((TerminalInput) -> Void)?
     var isSelected: Bool { active }
@@ -35,7 +39,8 @@ enum TerminalInput { case bytes(Data), paste(String) }
     var loadingDirectory: Bool { requestedDirectory != nil }
     @Published private var requestedDirectory: String?
     private var listing = UUID(), cwd: String?, shellPID: Int?, pending: DispatchWorkItem?
-    private var active = true, authenticated = false, probePending = false, probing = false
+    @Published private(set) var authenticated = false
+    private var active = true, probePending = false, probing = false
     private var watchCommandOutput = false
     private var lastOutput = TimeInterval.zero
     private var trackShellPID = false
@@ -79,6 +84,9 @@ enum TerminalInput { case bytes(Data), paste(String) }
         do {
             let cmd: String, args: [String]
             if let endpoint {
+                revealAfterLogin = true
+                loginStarted = ProcessInfo.processInfo.systemUptime
+                message = "正在连接 SSH：" + endpoint.target
                 let link = try Remote(endpoint)
                 remote = link
                 if let b = bookmark, b.portablePassword == true {
@@ -121,17 +129,32 @@ enum TerminalInput { case bytes(Data), paste(String) }
     }
     private func waitForMaster(_ token: UUID) {
         guard token == generation, let remote else { return }
-        if FileManager.default.fileExists(atPath: remote.socket) {
-            connected(using: DirectoryChannel { try SFTP(remote, control: $0) })
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.waitForMaster(token) }
+        let ready = { [weak self] in
+            guard let self, self.generation == token, !self.authenticated else { return }
+            self.connected(using: DirectoryChannel { try SFTP(remote, control: $0) })
+        }
+        masterWatch = remote.observeMaster(ready)
+        if masterWatch == nil {
+            // Descriptor exhaustion must not leave a usable SSH session stuck waiting.
+            if FileManager.default.fileExists(atPath: remote.socket) { ready() }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.waitForMaster(token) } }
         }
     }
     func connected(using channel: DirectoryChannel) {
+        masterWatch?.cancel(); masterWatch = nil
         passwordChannel = nil
-        browser = channel; authenticated = true; resumePane()
+        browser = channel; authenticated = true
+        if let loginStarted {
+            message = String(format: "SSH 已连接 · %.2f 秒", ProcessInfo.processInfo.systemUptime - loginStarted)
+        }
+        resumePane()
+        if revealAfterLogin && active { revealSFTP?() }
+        revealAfterLogin = false
     }
     func stop() {
+        masterWatch?.cancel(); masterWatch = nil
+        if endpoint != nil && loginStarted != nil { message = authenticated ? "SSH 已断开" : "SSH 连接未完成，请查看终端输出" }
+        loginStarted = nil; revealAfterLogin = false
         passwordChannel = nil
         if transferControl != nil, var t = transferStatus.snapshot {
             t.phase = .failed("SSH 连接已断开" + t.partialWarning); transferStatus.snapshot = t
@@ -183,6 +206,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
         }
     }
     func setFilesVisible(_ visible: Bool) {
+        revealAfterLogin = false
         let visible = visible && endpoint != nil
         guard filesVisible != visible else { return }
         filesVisible = visible
@@ -405,12 +429,12 @@ enum TerminalInput { case bytes(Data), paste(String) }
             }
         }
     }
-    func monitorDetails() async throws -> ServerSummary {
+    func monitorDetails(_ fields: DetailFields) async throws -> ServerSummary {
         guard monitor, authenticated, let remote else { throw TerminalError("监控已关闭或 SSH 尚未就绪") }
         let token = generation
-        let sections = try await Task.detached(priority: .utility) { try remote.monitorDetails() }.value
+        let sections = try await Task.detached(priority: .utility) { try remote.monitorDetails(fields) }.value
         guard token == generation else { throw CancellationError() }
         return sections
     }
-    deinit { terminal?.stop(); remote?.dispose() }
+    deinit { masterWatch?.cancel(); terminal?.stop(); remote?.dispose() }
 }

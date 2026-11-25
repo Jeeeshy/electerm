@@ -187,6 +187,21 @@ struct StatusLine: View {
     @AppSetting("monitorCPU") private var showCPU = true
     @AppSetting("monitorMemory") private var showMemory = true
     @ViewState private var details = false
+    @AppSetting("monitorDisk") private var showDisk = false
+    @AppSetting("monitorUsers") private var showUsers = false
+    @AppSetting("monitorUptime") private var showUptime = false
+    @ViewState private var summary = ServerSummary()
+    @ViewState private var detailError = ""
+    @ViewState private var loading = false
+    @ViewState private var revision = 0
+    private var statusFields: DetailFields {
+        var fields = DetailFields()
+        if showDisk { fields.insert(.disk) }
+        if showUsers { fields.insert(.users) }
+        if showUptime { fields.insert(.uptime) }
+        return fields
+    }
+    private var wanted: DetailFields { details ? .all : statusFields }
     private var needsCPU: Bool { showCPU || details }
     private var needsMemory: Bool { showMemory || details }
     var body: some View {
@@ -201,8 +216,13 @@ struct StatusLine: View {
                         Text("CPU \(session.cpuLabel)").monospacedDigit().help("整机 CPU，100% 减去 idle 和 iowait")
                     }
                     if showMemory { Divider(); Text("内存 \(session.memory)").monospacedDigit() }
+                    if showDisk { Text("硬盘 " + summary.disk).monospacedDigit() }
+                    if showUsers { Text("用户 " + summary.users).lineLimit(1).help(summary.users) }
+                    if showUptime { Text("运行 " + summary.uptime) }
                     icon("info.circle", "服务器详情") { details = true }
-                        .popover(isPresented: $details) { MonitorDetails(session: session).id(session.id) }
+                        .popover(isPresented: $details) {
+                            MonitorDetails(session: session, summary: summary, error: detailError, loading: loading) { revision += 1 }
+                        }
                 }
             }
             Text("UTF-8"); Divider()
@@ -215,6 +235,24 @@ struct StatusLine: View {
                 session.sample(cpuEnabled: needsCPU, memoryEnabled: needsMemory)
                 do { try await Task.sleep(nanoseconds: UInt64(max(2, min(60, interval))) * 1_000_000_000) } catch { return }
             }
+        }.task(id: "\(session.connectionID)-\(session.authenticated)-\(session.monitor)-\(wanted.rawValue)-\(details)-\(statusFields.rawValue)-\(revision)") {
+            guard session.monitor, session.authenticated, !wanted.isEmpty else {
+                summary = ServerSummary(); detailError = ""; loading = false; return
+            }
+            repeat {
+                loading = true; detailError = ""
+                do {
+                    let result = try await session.monitorDetails(wanted)
+                    guard !Task.isCancelled else { return }
+                    summary = result
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    detailError = error.localizedDescription; summary = ServerSummary()
+                }
+                loading = false
+                if statusFields.isEmpty { return }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            } while !Task.isCancelled
         }
     }
 }

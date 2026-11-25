@@ -2,7 +2,7 @@ import SwiftUI
 
 struct BookmarkEditor: View {
     let original: Bookmark?
-    let commit: (Bookmark) -> Void
+    let commit: (Bookmark, Bool) -> Void
     @ViewState private var name: String
     @ViewState private var address: String
     @ViewState private var identity: String
@@ -11,7 +11,7 @@ struct BookmarkEditor: View {
     @ViewState private var password = ""
     @ViewState private var error = ""
 
-    init(original: Bookmark?, commit: @escaping (Bookmark) -> Void) {
+    init(original: Bookmark?, commit: @escaping (Bookmark, Bool) -> Void) {
         self.original = original; self.commit = commit
         _name = ViewState(initialValue: original?.name ?? "")
         _address = ViewState(initialValue: original?.address ?? "")
@@ -38,10 +38,15 @@ struct BookmarkEditor: View {
                 Text("密码保存在本地加密库中；验证码请手动输入。").font(.caption).foregroundStyle(.secondary)
             }
             if !error.isEmpty { Text(error).foregroundStyle(.red) }
-            HStack { Spacer(); Button("保存", action: save).keyboardShortcut(.defaultAction) }
+            HStack {
+                Spacer()
+                if original == nil { Button("仅保存书签") { save(connect: false) } }
+                Button(original == nil ? "保存并连接" : "保存") { save(connect: original == nil) }
+                    .keyboardShortcut(.defaultAction)
+            }
         }.textFieldStyle(.roundedBorder)
     }
-    private func save() {
+    private func save(connect: Bool) {
         let address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let jump = jump.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Endpoint(address) != nil else { error = "请输入有效的 SSH 地址"; return }
@@ -67,7 +72,7 @@ struct BookmarkEditor: View {
                     throw error
                 }
             }
-            password = ""; commit(result)
+            password = ""; commit(result, connect)
         } catch { self.error = error.localizedDescription }
     }
 }

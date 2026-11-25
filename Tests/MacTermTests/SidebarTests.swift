@@ -74,13 +74,14 @@ import Testing
         let savedWidth = prefs.double(forKey: "sidebarWidth")
         #expect(abs(savedWidth - Double(expectedWidth)) < 0.01)
         #expect(host.hitTest(NSPoint(x: expectedWidth + 4, y: 220)) is SidebarGrip.Grip)
-        let checked = try pixels(180, 8, 48, 20)
+        let followX: CGFloat = 230, followY: CGFloat = 18
+        let checked = try pixels(followX - 16, followY - 7, 32, 14)
         let quickHeader = try pixels(2, 39, 138, 23)
         let files = try pixels(30, 66, 140, 25)
         let start = ContinuousClock.now
-        try await click(185, 18) // Follow toggle
+        try await click(followX, followY)
         #expect(!ssh.follow && !ssh.loadingDirectory)
-        #expect(try pixels(180, 8, 48, 20) != checked)
+        #expect(try pixels(followX - 16, followY - 7, 32, 14) != checked)
         try await click(14, 79) // Bookmarks rail
         #expect(work.sidebar == .bookmarks && !ssh.loadingDirectory)
         #expect(try pixels(30, 66, 140, 25) != files)
@@ -188,6 +189,31 @@ import Testing
         }
         #expect(!ssh.follow && ssh.monitor)
         #expect(local.live && local.connectionID == token && containsMarker())
+    }
+
+    @Test @MainActor func doubleClickAcrossTitlebarZoomsOnlyTheWindow() async throws {
+        final class ZoomWindow: NSWindow {
+            var zooms = 0
+            override func performZoom(_ sender: Any?) { zooms += 1 }
+        }
+        let work = Workspace()
+        let window = ZoomWindow(contentRect: NSRect(x: 30, y: 30, width: 880, height: 520),
+                                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.orderOut(nil); work.sessions.forEach { $0.close() } }
+        window.contentView = NSHostingView(rootView: MainPage(work: work))
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(100))
+        for x in [CGFloat(140), window.frame.width - 45] {
+            let point = NSPoint(x: x, y: (window.contentLayoutRect.maxY + window.frame.height) / 2)
+            func click(_ type: NSEvent.EventType) throws -> NSEvent {
+                try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 1, clickCount: 2, pressure: 1))
+            }
+            NSApp.sendEvent(try click(.leftMouseDown))
+        }
+        #expect(window.zooms == 2)
     }
 
     @Test @MainActor func rendersOnlyChosenTerminals() async throws {

@@ -24,25 +24,35 @@ struct ServerSummary {
     }
 }
 
-extension Remote {
-    func monitorDetails() throws -> ServerSummary {
-        // Local mounted storage only. Keep a container's root overlay, skip nested overlays and duplicate devices.
-        let command = """
+struct DetailFields: OptionSet {
+    let rawValue: Int
+    static let disk = Self(rawValue: 1), users = Self(rawValue: 2), uptime = Self(rawValue: 4)
+    static let all: Self = [.disk, .users, .uptime]
+    var command: String {
+        var parts = [String]()
+        if contains(.disk) { parts.append("""
         df -klPT | awk 'NR>1 && $2!="tmpfs" && $2!="devtmpfs" && $2!="squashfs" && (($1 ~ /^\\/dev\\//) || $2=="zfs" || $NF=="/") && !seen[$1]++ {used+=$4; total+=$3} END {if(total>0) printf "disk %.0f %.0f\\n",used,total}'
+        """) }
+        if contains(.users) { parts.append("""
         if logins=$(who); then printf '%s\\n' "$logins" | awk 'BEGIN{printf "users"} NF {if(!n[$1]++) names[++i]=$1} END{for(j=1;j<=i;j++) printf " %s×%d",names[j],n[names[j]]; print ""}'; fi
+        """) }
+        if contains(.uptime) { parts.append("""
         awk '{printf "uptime %.0f\\n",int($1)}' /proc/uptime
-        :
-        """
-        return ServerSummary(try output(command, limit: 8192))
+        """) }
+        return (parts + [":"]).joined(separator: "\n")
+    }
+}
+
+extension Remote {
+    func monitorDetails(_ fields: DetailFields) throws -> ServerSummary {
+        return ServerSummary(try output(fields.command, limit: 8192))
     }
 }
 
 struct MonitorDetails: View {
     @ObservedObject var session: Session
-    @ViewState private var summary = ServerSummary()
-    @ViewState private var error = ""
-    @ViewState private var loading = true
-    @ViewState private var revision = 0
+    let summary: ServerSummary, error: String, loading: Bool
+    let refresh: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -50,7 +60,7 @@ struct MonitorDetails: View {
                 Text("服务器详情").font(.headline)
                 Spacer()
                 if loading { ProgressView().controlSize(.small) }
-                icon("arrow.clockwise", "刷新") { revision += 1 }.disabled(loading)
+                icon("arrow.clockwise", "刷新") { refresh() }.disabled(loading)
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 5) {
                 row("CPU", session.cpuLabel)
@@ -60,18 +70,7 @@ struct MonitorDetails: View {
                 row("运行时间", summary.uptime)
             }
             if !error.isEmpty { Text(error).foregroundStyle(.secondary) }
-        }.padding(12).frame(width: 330, alignment: .leading).task(id: revision) {
-            loading = true; error = ""
-            do {
-                let result = try await session.monitorDetails()
-                guard !Task.isCancelled else { return }
-                summary = result
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.error = error.localizedDescription
-            }
-            loading = false
-        }
+        }.padding(12).frame(width: 330, alignment: .leading)
     }
     private func row(_ title: String, _ value: String) -> some View {
         GridRow {

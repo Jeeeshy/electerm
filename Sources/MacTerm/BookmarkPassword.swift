@@ -21,7 +21,10 @@ enum BookmarkPassword {
 
     init(directory: URL, target: String, readPassword: @escaping () -> Data?) throws {
         let path = directory.appendingPathComponent("password").path
-        guard let helper = Bundle.main.executableURL?.path else { throw TerminalError("找不到 SSH 密码助手") }
+        // swift run has no bundled helper; use the existing command-line entry point there.
+        let executable = Bundle.main.bundleURL.pathExtension == "app"
+            ? Bundle.main.url(forAuxiliaryExecutable: "ElectermAskpass") : Bundle.main.executableURL
+        guard let helper = executable?.path else { throw TerminalError("找不到 SSH 密码助手") }
         let fd = term_password_listener("Temp/" + directory.lastPathComponent + "/password")
         guard fd >= 0 else { throw TerminalError("无法建立本地密码通道") }
         environment = ["SSH_ASKPASS": helper, "SSH_ASKPASS_REQUIRE": "force",

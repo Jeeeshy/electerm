@@ -36,6 +36,10 @@ enum Pane { case bookmarks, files, hidden }
         serial += 1
         let s = Session(serial, address, endpoint: endpoint, bookmark: bookmark)
         s.activatePane = { [weak self, weak s] in if let s { self?.choose(s) } }
+        s.revealSFTP = { [weak self, weak s] in
+            guard let self, let s, self.current === s, self.sidebar != .files else { return }
+            self.toggleSidebar(.files)
+        }
         s.broadcast = { [weak self, weak s] input in
             guard let self, self.sendToAll else { return }
             for other in self.sessions where other.id != s?.id && other.live {

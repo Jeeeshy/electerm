@@ -47,6 +47,7 @@ case "$mode" in
     if ! printf '%s\n' "$identity" | grep -Eq '^[A-F0-9a-f]{40}$' || [ "${#identity}" -ne 40 ]; then
       echo "Expected one valid Developer ID Application identity" >&2; exit 1
     fi
+    codesign --force --keychain "$keychain" --sign "$identity" --timestamp --options runtime "$app/Contents/MacOS/ElectermAskpass"
     codesign --force --keychain "$keychain" --sign "$identity" --timestamp --options runtime "$app"
     codesign --verify --strict "$app"
     ditto -c -k --keepParent "$app" "$stage/notary.zip"

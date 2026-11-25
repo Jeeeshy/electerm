@@ -83,6 +83,18 @@ struct Remote {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                attributes: [.posixPermissions: 0o700])
     }
+    // OpenSSH publishes its authenticated control socket in this session's private directory.
+    func observeMaster(_ ready: @escaping () -> Void) -> DispatchSourceFileSystemObject? {
+        let fd = open(directory.path, O_EVTONLY | O_CLOEXEC)
+        guard fd >= 0 else { return nil }
+        let watch = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        let check = { if FileManager.default.fileExists(atPath: self.socket) { ready() } }
+        watch.setEventHandler(handler: check)
+        watch.setRegistrationHandler(handler: check) // Covers a socket published before registration finished.
+        watch.setCancelHandler { Darwin.close(fd) }
+        watch.resume()
+        return watch
+    }
     func login(keepalive: Bool, track: Bool, interval: Int = 30, timeout: Int = 0, bookmark: Bookmark? = nil) -> [String] {
         let connectOptions = timeout > 0 ? ["-o", "ConnectTimeout=\(min(timeout, 300))"] : []
         var profile: [String] = []

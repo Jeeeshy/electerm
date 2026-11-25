@@ -65,6 +65,51 @@ import Testing
         #expect(work.sidebar == .hidden)
     }
 
+    @Test @MainActor func masterWatchSeesExistingAndNewSocketNames() async throws {
+        let remote = try Remote(#require(Endpoint("localhost")))
+        defer { remote.dispose() }
+        let socket = URL(fileURLWithPath: remote.socket)
+        for existing in [false, true] {
+            if existing { try Data().write(to: socket) }
+            var ready = false
+            let watch = try #require(remote.observeMaster { ready = true })
+            defer { watch.cancel() }
+            if !existing {
+                try await Task.sleep(for: .milliseconds(20))
+                #expect(!ready)
+                try Data().write(to: socket, options: .atomic)
+            }
+            for _ in 0..<100 where !ready { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(ready)
+            try FileManager.default.removeItem(at: socket)
+        }
+    }
+
+    @Test @MainActor func authenticatedForegroundLoginRevealsFilesWithoutStealingSidebar() throws {
+        let work = Workspace(), local = try #require(work.current)
+        defer { work.sessions.forEach { $0.close() } }
+        let channel = DirectoryChannel { _ in throw TerminalError("fixture") }
+        let ssh = try #require(work.add("127.0.0.1:1"))
+        #expect(work.sidebar == .bookmarks)
+        ssh.connected(using: channel)
+        #expect(work.sidebar == .files && ssh.message.contains("秒"))
+        work.toggleSidebar(.files)
+        let background = try #require(work.add("127.0.0.1:1"))
+        work.choose(local)
+        background.connected(using: channel)
+        #expect(work.sidebar == .hidden && work.current === local)
+        let pending = try #require(work.add("127.0.0.1:1"))
+        work.toggleSidebar(.bookmarks)
+        pending.connected(using: channel)
+        #expect(work.sidebar == .bookmarks)
+    }
+
+    @Test func detailQueriesOnlyRequestSelectedMetrics() {
+        #expect(DetailFields().command == ":")
+        #expect(!DetailFields.uptime.command.contains("df ") && !DetailFields.uptime.command.contains("who"))
+        #expect(DetailFields.all.command.contains("/proc/uptime") && DetailFields.all.command.contains("df ") && DetailFields.all.command.contains("who"))
+    }
+
     @Test @MainActor func hiddenPaneKeepsInFlightListing() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)

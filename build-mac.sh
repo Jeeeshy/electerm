@@ -38,6 +38,11 @@ lipo "$app/Contents/MacOS/ElectermMac" -verify_arch arm64
 if otool -L "$app/Contents/MacOS/ElectermMac" | grep -Eq 'JavaScriptCore|WebKit|Electron'; then
   echo "Unexpected web engine in the executable" >&2; exit 1
 fi
+helper="$app/Contents/MacOS/ElectermAskpass"
+xcrun clang -arch arm64 -mmacosx-version-min=14.0 -Os -Wl,-dead_strip -DELECTERM_ASKPASS_MAIN \
+  -ISources/TerminalPTY/include Sources/TerminalPTY/Askpass.c -o "$helper"
+strip -x "$helper"
+codesign --force --sign - "$helper"
 codesign --force --sign - "$app"
 codesign --verify --strict "$app"
 "$app/Contents/MacOS/ElectermMac" --verify-terminal
