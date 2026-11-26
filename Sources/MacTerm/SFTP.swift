@@ -196,9 +196,10 @@ final class SFTP {
         let h = try opened.field()
         defer { try? close(h) }
         var nameBytes = 0, entries = 0
-        while var result = try request(12, 104, field(h), eof: true) {
+        func readBatch() throws -> Bool {
+            guard var result = try request(12, 104, field(h), eof: true) else { return false }
             let n = try result.number()
-            guard n > 0 else { break }
+            guard n > 0 else { return false }
             entries += Int(n)
             guard entries <= 100_000 else { throw TerminalError("Remote directory exceeds the listing limit") }
             for _ in 0..<n {
@@ -210,7 +211,9 @@ final class SFTP {
                 guard nameBytes <= 8_388_608 else { throw TerminalError("Remote filenames exceed the listing limit") }
                 try visit(item)
             }
+            return true
         }
+        while try autoreleasepool(invoking: readBatch) {}
     }
 
     private func attributes(at pathName: String) throws -> RemoteFile {
@@ -318,24 +321,27 @@ final class SFTP {
                 } catch is SFTPStatusError { total = nil }
             }
             progress(0, total)
-            while true {
+            func copyChunk() throws -> Bool {
                 var part = field(h)
                 part.number(UInt32(offset >> 32)); part.number(UInt32(truncatingIfNeeded: offset))
                 if upload {
-                    guard let data = try file.read(upToCount: 32768), !data.isEmpty else { break }
+                    guard let data = try file.read(upToCount: 32768), !data.isEmpty else { return false }
                     part.field(data)
                     _ = try request(6, 101, part)
                     offset += UInt64(data.count)
                 } else {
                     part.number(32768)
-                    guard var reply = try request(5, 103, part, eof: true) else { break }
+                    guard var reply = try request(5, 103, part, eof: true) else { return false }
                     let data = try reply.field()
                     guard !data.isEmpty && data.count <= 32768 else { throw TerminalError("Invalid SFTP read") }
                     try file.write(contentsOf: data)
                     offset += UInt64(data.count)
                 }
                 progress(offset, total)
+                return true
             }
+            // Foundation pipe/file buffers must drain during the transfer, not at queue exit.
+            while try autoreleasepool(invoking: copyChunk) {}
             try close(h)
         } catch {
             try? close(h)

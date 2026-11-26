@@ -36,10 +36,17 @@ final class PseudoTerminal {
             }
             if done { DispatchQueue.main.async { ended() } }
         }
-        DispatchQueue.global(qos: .utility).async {
-            var status: Int32 = 0
-            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+        // Outlive the tab until this child exits. PTY EOF still delivers its final output.
+        let exitWatch = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
+        func reap(_ options: Int32) {
+            guard !exitWatch.isCancelled else { return }
+            var result: pid_t
+            repeat { result = waitpid(pid, nil, options) } while result == -1 && errno == EINTR
+            if result == pid || (result == -1 && errno == ECHILD) { exitWatch.cancel() }
         }
+        exitWatch.setRegistrationHandler { reap(WNOHANG) } // Includes children that already exited.
+        exitWatch.setEventHandler { reap(0) }
+        exitWatch.resume()
     }
     func write(_ bytes: Data) {
         // DispatchIO is thread-safe; writes to a closed channel fail without reusing its fd.

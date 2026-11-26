@@ -9,6 +9,7 @@ enum Pane { case bookmarks, files, hidden }
     @Published private(set) var splitIDs: [UUID] = []
     // Each open tab belongs to one pane; switching tabs only changes that pane's visible ID.
     private var group: [UUID: UUID] = [:]
+    func paneID(for session: Session) -> UUID? { group[session.id] }
     func tabs(in pane: UUID) -> [Session] {
         splitIDs.isEmpty ? sessions : sessions.filter { group[$0.id] == group[pane] }
     }
@@ -21,20 +22,18 @@ enum Pane { case bookmarks, files, hidden }
         current?.setFilesVisible(sidebar == .files)
     }
     @Published var sendToAll = false
-    @Published var bookmarks: [Bookmark] {
-        didSet { if let data = try? JSONEncoder().encode(bookmarks) { Preferences.shared.set(data, forKey: "bookmarks") } }
-    }
+    let library: ConnectionLibrary
     private var serial = 0
     var current: Session? { sessions.first { $0.id == selected } }
-    init() {
-        bookmarks = (Preferences.shared.data(forKey: "bookmarks").flatMap { try? JSONDecoder().decode([Bookmark].self, from: $0) }) ?? []
-        add()
-    }
+    init(library: ConnectionLibrary? = nil) { self.library = library ?? .shared }
     @discardableResult func add(_ address: String = "", bookmark: Bookmark? = nil) -> Session? {
         let endpoint = Endpoint(address)
         guard address.isEmpty || endpoint != nil else { return nil }
         serial += 1
         let s = Session(serial, address, endpoint: endpoint, bookmark: bookmark)
+        let item = bookmark.map { RecentConnection.bookmark($0.id) } ?? (endpoint == nil ? .local : .address(address.trimmingCharacters(in: .whitespacesAndNewlines)))
+        s.didConnect = { [weak library] in library?.record(item) }
+        if endpoint == nil { s.localDidExit = { [weak self, weak s] in if let s { self?.close(s) } } }
         s.activatePane = { [weak self, weak s] in if let s { self?.choose(s) } }
         s.revealSFTP = { [weak self, weak s] in
             guard let self, let s, self.current === s, self.sidebar != .files else { return }
@@ -49,7 +48,7 @@ enum Pane { case bookmarks, files, hidden }
                 }
             }
         }
-        if let selected, let owner = group[selected] { group[s.id] = owner }
+        if let pane = selected ?? splitIDs.first, let owner = group[pane] { group[s.id] = owner }
         sessions.append(s); choose(s); s.start()
         return s
     }
@@ -82,11 +81,15 @@ enum Pane { case bookmarks, files, hidden }
             } else { splitIDs.remove(at: slot); next = splitIDs.first }
             if splitIDs.count < 2 { cancelSplit() }
         }
-        if sessions.isEmpty { add() }
+        if sessions.isEmpty { selected = nil }
         else if selected == s.id {
             selected = nil
             choose(sessions.first { $0.id == next } ?? sessions[min(index, sessions.count - 1)])
         }
+    }
+    func closeAll() {
+        sessions.forEach { $0.close() }
+        sessions.removeAll(); selected = nil; cancelSplit()
     }
     func cancelSplit() {
         group.removeAll()
@@ -114,10 +117,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func application(_ sender: NSApplication, shouldSaveSecureApplicationState coder: NSCoder) -> Bool { false }
     func application(_ sender: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool { false }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    weak var workspace: Workspace?
-    func applicationWillTerminate(_ notification: Notification) { workspace?.sessions.forEach { $0.close() } }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private struct TerminalWindow: View {
+    @StateObject private var work = Workspace()
+    var body: some View {
+        ZStack { MainPage(work: work) }
+            .frame(minWidth: 620, minHeight: 340)
+            .focusedSceneObject(work)
+            .onDisappear { work.closeAll() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in work.closeAll() }
+    }
+}
+
+private struct TerminalCommands: Commands {
+    @FocusedObject private var work: Workspace?
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("新建本地终端") { work?.add() }.keyboardShortcut("t").disabled(work == nil)
+            Button("关闭当前标签") { if let work, let s = work.current { work.close(s) } }
+                .keyboardShortcut("w", modifiers: [.command, .shift]).disabled(work?.current == nil)
+        }
     }
 }
 
@@ -142,19 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var work = Workspace()
     var body: some Scene {
-        Window("Electerm Terminal", id: "terminal") {
-            MainPage(work: work)
-                .frame(minWidth: 620, minHeight: 340)
-                .onAppear { delegate.workspace = work }
-        }
-        .defaultSize(width: 1120, height: 750)
-        .commands {
-            CommandGroup(after: .newItem) {
-                Button("New Local Terminal") { work.add() }.keyboardShortcut("t")
-                Button("Close Tab") { if let s = work.current { work.close(s) } }.keyboardShortcut("w", modifiers: [.command, .shift])
-            }
-        }
+        WindowGroup("Electerm Terminal", id: "terminal") { TerminalWindow() }
+            .defaultSize(WindowTitleTint.defaultContentSize)
+            .commands { TerminalCommands() }
     }
 }

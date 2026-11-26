@@ -20,6 +20,8 @@ enum TerminalInput { case bytes(Data), paste(String) }
     @Published var working = false
     @Published var monitor = false { didSet { if monitor != oldValue { resetSample() } } }
     @Published var memory = "—"
+    var didConnect: (() -> Void)?
+    var localDidExit: (() -> Void)?
     var revealSFTP: (() -> Void)?
     private var revealAfterLogin = false
     private var loginStarted: TimeInterval?
@@ -96,7 +98,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
                 }
                 cmd = "/usr/bin/ssh"
                 let prefs = Preferences.shared
-                trackShellPID = prefs.object(forKey: "shellTracking") as? Bool ?? true
+                trackShellPID = prefs.bool(forKey: "shellTracking")
                 args = link.login(keepalive: prefs.object(forKey: "keepalive") as? Bool ?? true,
                                   track: trackShellPID, interval: prefs.object(forKey: "keepaliveSeconds") as? Int ?? 30,
                                   timeout: prefs.integer(forKey: "connectTimeout"), bookmark: bookmark)
@@ -115,6 +117,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
                 if self.probePending { self.scheduleProbe() }
             }, ended: { [weak self] in
                 guard let self, self.generation == token else { return }
+                if let localDidExit = self.localDidExit { localDidExit(); return }
                 self.stop()
                 self.screen.ended("disconnected")
             })
@@ -122,7 +125,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
             screen.view.replies.bind(terminal)
             screen.setWrap(wrap)
             live = true
-            if remote != nil { waitForMaster(token) }
+            if remote != nil { waitForMaster(token) } else { didConnect?() }
         } catch {
             stop(); message = error.localizedDescription; screen.ended("launch failed")
         }
@@ -143,7 +146,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
     func connected(using channel: DirectoryChannel) {
         masterWatch?.cancel(); masterWatch = nil
         passwordChannel = nil
-        browser = channel; authenticated = true
+        browser = channel; authenticated = true; didConnect?()
         if let loginStarted {
             message = String(format: "SSH 已连接 · %.2f 秒", ProcessInfo.processInfo.systemUptime - loginStarted)
         }
@@ -161,6 +164,7 @@ enum TerminalInput { case bytes(Data), paste(String) }
         }
         transferControl?.cancel(); transferControl = nil
         connectionID = UUID(); listing = UUID(); readingDirectory = false; hasListing = false
+        if !entries.includingHidden(true).isEmpty { entries = FileListing() }
         if requestedDirectory != nil { requestedDirectory = nil }
         if live { live = false }
         authenticated = false; trackShellPID = false

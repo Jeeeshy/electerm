@@ -1,0 +1,33 @@
+--- a/Sources/SwiftTerm/Mac/MacTerminalView.swift
++++ b/Sources/SwiftTerm/Mac/MacTerminalView.swift
+@@ -27,4 +27,9 @@
+ private final class TerminalScroller: NSScroller {
+     var trackingChanged: ((Bool) -> Void)?
++    override var isHidden: Bool {
++        didSet {
++            if oldValue != isHidden, let terminal = superview { window?.invalidateCursorRects(for: terminal) }
++        }
++    }
+ 
+     override var isOpaque: Bool {
+@@ -1925,7 +1930,7 @@
+         // colour in Accessibility settings) each set() re-renders the cursor image,
+         // so setting the cursor that is already current is expensive. Skip it.
+-        if NSCursor.current != NSCursor.iBeam {
+-            NSCursor.iBeam.set ()
+-        }
++        let onScroller = scroller != nil && !scroller.isHidden && scroller.frame.contains(convert(event.locationInWindow, from: nil))
++        let cursor: NSCursor = onScroller ? .arrow : .iBeam
++        if NSCursor.current != cursor { cursor.set() }
+     }
+     
+@@ -4796,5 +4801,8 @@
+     
+     public override func resetCursorRects() {
+-        addCursorRect(bounds, cursor: .iBeam)
++        guard let scroller, !scroller.isHidden else { addCursorRect(bounds, cursor: .iBeam); return }
++        let (text, _) = bounds.divided(atDistance: max(0, scroller.frame.minX - bounds.minX), from: .minXEdge)
++        addCursorRect(text, cursor: .iBeam)
++        addCursorRect(scroller.frame, cursor: .arrow)
+     }
+     

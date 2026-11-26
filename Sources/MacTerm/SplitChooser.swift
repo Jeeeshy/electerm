@@ -60,13 +60,14 @@ struct TerminalPanes: View {
     }
     private func row(_ panes: ArraySlice<Session>) -> some View {
         HSplitView {
-            ForEach(panes) { session in terminal(session) }
+            // A pane owns its scrollbar; changing its visible session must not replace it.
+            ForEach(panes.map { (id: work.paneID(for: $0), session: $0) }, id: \.id) { terminal($0.session) }
         }
     }
     private func terminal(_ session: Session) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 2) {
-                ScrollView(.horizontal) {
+                TabStripScroll {
                     HStack(spacing: 3) {
                         ForEach(work.tabs(in: session.id)) { tab in
                             let visible = tab.id == session.id
@@ -92,10 +93,53 @@ struct TerminalPanes: View {
                             }
                         }
                         icon("plus", "新建本地终端") { work.choose(session); work.add() }.padding(.horizontal, 5)
-                    }.padding(.horizontal, 4)
-                }.scrollIndicators(.hidden)
+                    }.padding(.horizontal, 4).fixedSize(horizontal: true, vertical: false)
+                        .font(.system(size: 12)).buttonStyle(.plain)
+                }
             }.frame(height: 28).background(chrome)
             TerminalView(session: session).id(session.id).frame(minWidth: 48, minHeight: 32)
+        }
+    }
+}
+
+// Give the native draggable scroller its own five-point lane when tabs overflow.
+private struct TabStripScroll<Content: View>: NSViewRepresentable {
+    @ViewBuilder var content: () -> Content
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.scrollerStyle = .legacy
+        scroll.horizontalScroller = ThinScroller(frame: NSRect(x: 0, y: 0, width: 100, height: 5))
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
+        let host = NSHostingView(rootView: content())
+        host.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = host
+        let clip = scroll.contentView
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            host.topAnchor.constraint(equalTo: clip.topAnchor),
+            host.heightAnchor.constraint(equalTo: clip.heightAnchor)
+        ])
+        return scroll
+    }
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        (scroll.documentView as? NSHostingView<Content>)?.rootView = content()
+    }
+
+    private final class ThinScroller: NSScroller {
+        override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat { 5 }
+        override func rect(for part: NSScroller.Part) -> NSRect {
+            let rect = super.rect(for: part)
+            return rect.isEmpty ? rect : NSRect(x: rect.minX, y: bounds.minY, width: rect.width, height: bounds.height)
+        }
+        override func draw(_ dirtyRect: NSRect) {
+            let knob = rect(for: .knob)
+            guard !knob.isEmpty else { return }
+            NSColor.secondaryLabelColor.setFill()
+            NSBezierPath(roundedRect: NSRect(x: knob.minX, y: bounds.midY - 1.5, width: knob.width, height: 3),
+                         xRadius: 1.5, yRadius: 1.5).fill()
         }
     }
 }

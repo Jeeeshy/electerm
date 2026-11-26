@@ -4,6 +4,28 @@ import Testing
 @testable import MacTerm
 
 @Suite(.serialized) struct SidebarTests {
+    @Test @MainActor func commandFFocusesSearchFromTerminal() async throws {
+        let work = Workspace(), session = try #require(work.add())
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 500),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.orderOut(nil); session.close() }
+        window.contentView = NSHostingView(rootView: MainPage(work: work))
+        window.makeKeyAndOrderFront(nil)
+        try await Task.sleep(for: .milliseconds(150))
+        for _ in 0..<2 {
+            window.makeFirstResponder(session.screen.view)
+            let key = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: "f", charactersIgnoringModifiers: "f", isARepeat: false, keyCode: 3))
+            #expect(window.performKeyEquivalent(with: key))
+            func focused() -> Bool {
+                ((window.firstResponder as? NSTextView)?.delegate as? NSTextField)?.placeholderString == "搜索终端历史"
+            }
+            for _ in 0..<30 where !focused() { try await Task.sleep(for: .milliseconds(20)) }
+            #expect(focused())
+        }
+    }
     // A real hosting window and a real SFTP subsystem; only the first reply is delayed.
     @Test @MainActor func clickDuringSlowListing() async throws {
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -126,7 +148,7 @@ import Testing
         prefs.set("steadyBlock", forKey: keys[0]); prefs.set("dark", forKey: keys[1])
         prefs.set(13, forKey: keys[2]); prefs.set(true, forKey: keys[3]); prefs.set(true, forKey: keys[4])
         prefs.set(false, forKey: keys[5])
-        let work = Workspace(), local = try #require(work.current)
+        let work = Workspace(), local = try #require(work.add())
         let ssh = Session(2, "fixture", endpoint: Endpoint("fixture"))
         work.sessions.append(ssh)
         let token = local.connectionID
@@ -192,19 +214,19 @@ import Testing
     }
 
     @Test @MainActor func doubleClickAcrossTitlebarZoomsOnlyTheWindow() async throws {
-        final class ZoomWindow: NSWindow {
-            var zooms = 0
-            override func performZoom(_ sender: Any?) { zooms += 1 }
-        }
         let work = Workspace()
-        let window = ZoomWindow(contentRect: NSRect(x: 30, y: 30, width: 880, height: 520),
-                                styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 30, y: 30, width: 880, height: 520),
+                                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         defer { window.orderOut(nil); work.sessions.forEach { $0.close() } }
+        let available = try #require(window.screen).visibleFrame
+        window.setFrame(available, display: false)
         window.contentView = NSHostingView(rootView: MainPage(work: work))
         window.makeKeyAndOrderFront(nil)
         try await Task.sleep(for: .milliseconds(100))
-        for x in [CGFloat(140), window.frame.width - 45] {
+        let normal = window.frame
+        #expect(normal.width < available.width && normal.height < available.height)
+        for (index, x) in [CGFloat(140), window.frame.width - 45].enumerated() {
             let point = NSPoint(x: x, y: (window.contentLayoutRect.maxY + window.frame.height) / 2)
             func click(_ type: NSEvent.EventType) throws -> NSEvent {
                 try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
@@ -212,12 +234,50 @@ import Testing
                     context: nil, eventNumber: 1, clickCount: 2, pressure: 1))
             }
             NSApp.sendEvent(try click(.leftMouseDown))
+            try await Task.sleep(for: .milliseconds(350))
+            if index == 0 {
+                #expect(window.frame.width > normal.width && window.frame.height > normal.height)
+                #expect(!window.styleMask.contains(.fullScreen))
+            } else { #expect(window.frame == normal) }
         }
-        #expect(window.zooms == 2)
+    }
+
+    @Test @MainActor func switchingLateTabsPreservesStripPosition() async throws {
+        let work = Workspace(), tabs = (1...24).map { Session($0) }
+        work.sessions = tabs
+        work.choose(tabs[0])
+        let window = NSWindow(contentRect: NSRect(x: 30, y: 30, width: 820, height: 460),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { work.closeAll(); window.orderOut(nil) }
+        window.contentView = NSHostingView(rootView: MainPage(work: work))
+        window.orderFront(nil)
+        func strip(_ view: NSView) -> NSScrollView? {
+            if let scroll = view as? NSScrollView, scroll.horizontalScroller?.frame.height == 5,
+               scroll.documentVisibleRect.width < (scroll.documentView?.frame.width ?? 0) { return scroll }
+            return view.subviews.lazy.compactMap(strip).first
+        }
+        for split in [false, true] {
+            if split { #expect(work.setPanes([tabs[0].id, tabs[1].id])) }
+            try await Task.sleep(for: .milliseconds(120))
+            let host = try #require(window.contentView)
+            let before = try #require(strip(host))
+            let doc = try #require(before.documentView)
+            doc.scroll(NSPoint(x: doc.bounds.maxX - before.contentView.bounds.width, y: 0))
+            let offset = before.contentView.bounds.minX
+            #expect(offset > 0)
+            let target = split ? tabs[22] : tabs[23]
+            work.choose(target)
+            try await Task.sleep(for: .milliseconds(120))
+            let after = try #require(strip(host))
+            #expect(after === before)
+            #expect(abs(after.contentView.bounds.minX - offset) < 1)
+            #expect(target.screen.view.window === window)
+        }
     }
 
     @Test @MainActor func rendersOnlyChosenTerminals() async throws {
-        let work = Workspace(), local = try #require(work.current)
+        let work = Workspace(), local = try #require(work.add())
         let tabs = (2...5).map { Session($0) }
         let window = NSWindow(contentRect: NSRect(x: 80, y: 90, width: 900, height: 600),
                               styleMask: [.titled], backing: .buffered, defer: false)

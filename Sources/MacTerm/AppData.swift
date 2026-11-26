@@ -23,6 +23,16 @@ enum AppData {
         try directory(folder)
         try directory(folder.appendingPathComponent("Temp", isDirectory: true))
     }
+    // Called under the exclusive data lock, before any new session can create a directory.
+    static func removeStaleSessions(in temp: URL) {
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: temp.path)) ?? [] {
+            guard let prefix = ["et-", "electerm-drag-"].first(where: name.hasPrefix),
+                  let uuid = UUID(uuidString: String(name.dropFirst(prefix.count))),
+                  name == prefix + uuid.uuidString else { continue }
+            try? fm.removeItem(at: temp.appendingPathComponent(name))
+        }
+    }
     static func prepare() throws {
         try prepareFolders(at: folder)
         let lock = Darwin.open(folder.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
@@ -34,6 +44,7 @@ enum AppData {
             guard FileManager.default.changeCurrentDirectoryPath(folder.path) else { throw TerminalError("无法进入数据目录：\(folder.path)") }
         } catch { close(lock); throw error }
         temporary = folder.appendingPathComponent("Temp", isDirectory: true)
+        removeStaleSessions(in: temporary)
     }
 }
 

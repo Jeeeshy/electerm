@@ -3,6 +3,59 @@ import Testing
 @testable import MacTerm
 
 @Suite(.serialized) struct CoreTests {
+    @Test @MainActor func windowsShowHomeOnlyWhenNoTabsRemain() async throws {
+        let library = ConnectionLibrary(preferences: Preferences())
+        let first = Workspace(library: library), second = Workspace(library: library)
+        defer { first.closeAll(); second.closeAll() }
+        #expect(first.sessions.isEmpty && second.sessions.isEmpty && first.current == nil)
+        let background = try #require(first.add()), active = try #require(first.add())
+        let separate = try #require(second.add())
+        active.send(Data("exit\r".utf8), broadcast: false)
+        for _ in 0..<100 where first.current === active { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(first.current === background && first.sessions.count == 1 && background.live)
+        #expect(second.current === separate && separate.live && library.recent == [.local])
+        let ssh = Session(99, "fixture", endpoint: Endpoint("fixture"))
+        first.sessions.append(ssh)
+        let rightmost = try #require(first.add())
+        first.close(rightmost)
+        #expect(first.current === ssh && background.live)
+        first.close(background)
+        #expect(first.current === ssh)
+        first.close(ssh)
+        #expect(first.sessions.isEmpty && first.current == nil)
+        separate.send(Data("exit\r".utf8), broadcast: false)
+        for _ in 0..<100 where second.current != nil { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(second.sessions.isEmpty && second.current == nil)
+    }
+
+    @Test @MainActor func recentConnectionsPersistBoundedAndUseCurrentBookmarks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try AppData.directory(root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("settings.plist"), prefs = Preferences()
+        try prefs.open(at: url)
+        let library = ConnectionLibrary(preferences: prefs), work = Workspace(library: library)
+        defer { work.closeAll() }
+        let b = Bookmark(name: "开发机", address: "127.0.0.1:1")
+        library.save(b)
+        let ssh = try #require(work.add(b.address, bookmark: b))
+        #expect(library.recent.isEmpty)
+        ssh.connected(using: DirectoryChannel { _ in throw TerminalError("fixture") })
+        #expect(library.recent == [.bookmark(b.id)])
+        work.close(ssh)
+        #expect(work.sessions.isEmpty && work.current == nil)
+        for n in 0..<12 { library.record(.address("server-\(n)")) }
+        library.record(.address("server-6")); library.record(.bookmark(b.id))
+        #expect(library.recent.count == 10 && library.recent[1] == .address("server-6"))
+        #expect(Set(library.recent).count == 10)
+        let fresh = Preferences(); try fresh.open(at: url)
+        let restored = ConnectionLibrary(preferences: fresh)
+        #expect(restored.recent == library.recent)
+        restored.remove(b)
+        #expect(!restored.recent.contains(.bookmark(b.id)))
+        restored.clearRecent()
+        #expect(restored.recent.isEmpty && fresh.data(forKey: "recentConnections") == nil)
+    }
     @Test func userSupportFolderIsPrivateAndReused() throws {
         let fm = FileManager.default
         let support = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -43,8 +96,20 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
+    @Test func staleSessionCleanupPreservesOtherFiles() throws {
+        let fm = FileManager.default, root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try AppData.directory(root)
+        defer { try? fm.removeItem(at: root) }
+        let untouched = root.appendingPathComponent("et-keep"), drag = root.appendingPathComponent("electerm-drag-" + UUID().uuidString)
+        try AppData.directory(untouched)
+        try AppData.directory(root.appendingPathComponent("et-" + UUID().uuidString))
+        try fm.createSymbolicLink(at: drag, withDestinationURL: untouched)
+        AppData.removeStaleSessions(in: root)
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["et-keep"])
+    }
+
     @Test @MainActor func sidebarChoiceSurvivesTabChanges() throws {
-        let work = Workspace(), local = try #require(work.current)
+        let work = Workspace(), local = try #require(work.add())
         let ssh = Session(2, "fixture", endpoint: Endpoint("fixture"))
         work.sessions.append(ssh)
         defer { work.sessions.forEach { $0.close() } }
@@ -86,7 +151,7 @@ import Testing
     }
 
     @Test @MainActor func authenticatedForegroundLoginRevealsFilesWithoutStealingSidebar() throws {
-        let work = Workspace(), local = try #require(work.current)
+        let work = Workspace(), local = try #require(work.add())
         defer { work.sessions.forEach { $0.close() } }
         let channel = DirectoryChannel { _ in throw TerminalError("fixture") }
         let ssh = try #require(work.add("127.0.0.1:1"))
@@ -161,7 +226,7 @@ import Testing
 
     @Test @MainActor func splitUsesOnlyChosenTabs() throws {
         let work = Workspace()
-        let first = try #require(work.current)
+        let first = try #require(work.add())
         let others = (2...5).map { Session($0) }
         work.sessions.append(contentsOf: others)
         defer { work.sessions.forEach { $0.close() } }
@@ -183,6 +248,10 @@ import Testing
         #expect(work.splitIDs == chosen)
         work.close(others[0])
         #expect(work.visibleSessions.map(\.id) == [chosen[0], chosen[2]])
+        #expect(work.selected == chosen[0])
+        let added = try #require(work.add())
+        #expect(work.visibleSessions.contains { $0 === added })
+        work.close(added)
         #expect(work.selected == chosen[0])
         work.choose(first)
         #expect(work.splitIDs == [first.id, chosen[2]])
@@ -277,6 +346,8 @@ import Testing
         for _ in 0..<200 where !closed { try await Task.sleep(for: .milliseconds(25)) }
         #expect(closed)
         #expect(String(decoding: bytes, as: UTF8.self).contains("PTY_READY"))
+        for _ in 0..<40 where kill(pty.pid, 0) == 0 { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(kill(pty.pid, 0) == -1 && errno == ESRCH)
     }
     @Test @MainActor func testProtocolReplyReturnsToOriginatingPTY() async throws {
         let screen = Screen()

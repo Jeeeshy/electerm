@@ -228,8 +228,8 @@ struct StatusLine: View {
             Text("UTF-8"); Divider()
             Text(session.message).lineLimit(1).help(session.message)
             Spacer()
-        }.padding(.horizontal, 8).font(.system(size: 11)).task(id: "\(session.id)-\(session.monitor)-\(interval)-\(needsCPU)-\(needsMemory)") {
-            guard session.monitor, needsCPU || needsMemory else { return }
+        }.padding(.horizontal, 8).font(.system(size: 11)).task(id: "\(session.id)-\(session.authenticated)-\(session.monitor)-\(interval)-\(needsCPU)-\(needsMemory)") {
+            guard session.authenticated, session.monitor, needsCPU || needsMemory else { return }
             session.resetSample()
             while !Task.isCancelled {
                 session.sample(cpuEnabled: needsCPU, memoryEnabled: needsMemory)
